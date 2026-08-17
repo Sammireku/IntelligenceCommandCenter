@@ -29,23 +29,28 @@ interface HealthPanelProps {
 }
 
 export const HealthPanel: React.FC<HealthPanelProps> = ({ telemetry, liteMode = false }) => {
-  const { data, status, latencyMs, error } = telemetry;
+  const { data, status, latencyMs, error } = telemetry || {};
   const [activeTab, setActiveTab] = useState<'discoveries' | 'alternativeMedicine' | 'papers' | 'outbreaks'>('discoveries');
   const [selectedThreatFilter, setSelectedThreatFilter] = useState<'all' | ResearchPaperItem['threatLevel']>('all');
   const [altSearch, setAltSearch] = useState<string>('');
   const [discoveryCategory, setDiscoveryCategory] = useState<string>('all');
 
-  const filteredPapers = (data.papers || []).filter((p) => {
+  const papers = data?.papers || [];
+  const discoveries = data?.discoveries || [];
+  const alternativeMedicine = data?.alternativeMedicine || [];
+  const diseaseOutbreaks = data?.diseaseOutbreaks || [];
+
+  const filteredPapers = papers.filter((p) => {
     if (selectedThreatFilter === 'all') return true;
     return p.threatLevel === selectedThreatFilter;
   });
 
-  const filteredDiscoveries = (data.discoveries || []).filter((d) => {
+  const filteredDiscoveries = discoveries.filter((d) => {
     if (discoveryCategory === 'all') return true;
     return d.category === discoveryCategory;
   });
 
-  const filteredAlternativeMedicine = (data.alternativeMedicine || []).filter((item) => {
+  const filteredAlternativeMedicine = alternativeMedicine.filter((item) => {
     if (!altSearch.trim()) return true;
     const q = altSearch.toLowerCase();
     return (
@@ -122,7 +127,7 @@ export const HealthPanel: React.FC<HealthPanelProps> = ({ telemetry, liteMode = 
             <Sparkles className="w-3 h-3 text-[#00d1ff]" />
           </div>
           <div className="text-sm font-bold text-neutral-100 mt-1">
-            {data.discoveries?.length || 4} Clinical Trials
+            {discoveries.length || 4} Clinical Trials
           </div>
           <div className="text-[10px] text-[#00d1ff] mt-0.5">
             CRISPR, Oncology & mRNA
@@ -135,7 +140,7 @@ export const HealthPanel: React.FC<HealthPanelProps> = ({ telemetry, liteMode = 
             <Leaf className="w-3 h-3 text-emerald-400" />
           </div>
           <div className="text-sm font-bold text-emerald-400 mt-1">
-            {data.alternativeMedicine?.length || 6} RCT Studies
+            {alternativeMedicine.length || 6} RCT Studies
           </div>
           <div className="text-[10px] text-[#888888] mt-0.5">
             Standardized Botanical Extracts
@@ -148,7 +153,7 @@ export const HealthPanel: React.FC<HealthPanelProps> = ({ telemetry, liteMode = 
             <BookOpen className="w-3 h-3 text-amber-400" />
           </div>
           <div className="text-sm font-bold text-neutral-100 mt-1">
-            {data.papers?.length || 12} Indexed Papers
+            {papers.length || 12} Indexed Papers
           </div>
           <div className="text-[10px] text-amber-400 mt-0.5">
             2025/2026 Peer-Reviewed

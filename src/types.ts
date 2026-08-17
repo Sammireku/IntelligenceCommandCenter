@@ -42,6 +42,11 @@ export interface EarthquakeItem {
 export interface SpaceWeatherTelemetry {
   kpCurrent: number;
   kpEstimated24hMax: number;
+  kpIndex?: number;
+  geomagneticStormRisk?: string;
+  solarWindSpeedKmS?: number;
+  solarWindDensityPcm3?: number;
+  solarFlareThreat?: string;
   stormLevel: 'None' | 'G1 Minor' | 'G2 Moderate' | 'G3 Strong' | 'G4 Severe' | 'G5 Extreme';
   radioBlackoutRisk: 'Low' | 'Moderate' | 'High' | 'Severe';
   solarRadiationRisk: 'Quiet' | 'Active' | 'Storm';
@@ -55,12 +60,14 @@ export interface WeatherHubItem {
   lat: number;
   lng: number;
   tempC: number;
-  windSpeedKmh: number;
-  aqiUs: number;
-  aqiCategory: 'Good' | 'Moderate' | 'Unhealthy for Sensitive' | 'Unhealthy' | 'Very Unhealthy' | 'Hazardous';
+  windSpeedKmh?: number;
+  weatherCondition?: string;
+  airQualityIndex?: number;
+  aqiUs?: number;
+  aqiCategory: 'Good' | 'Moderate' | 'Unhealthy for Sensitive' | 'Unhealthy' | 'Very Unhealthy' | 'Hazardous' | string;
   pm25: number;
-  pm10: number;
-  condition: string;
+  pm10?: number;
+  condition?: string;
   anomalyFlag?: boolean;
 }
 
@@ -70,7 +77,7 @@ export interface FireAnomalyItem {
   lat: number;
   lng: number;
   brightness: number;
-  confidence: 'nominal' | 'high' | 'low';
+  confidence: 'nominal' | 'high' | 'low' | string;
   acqDate: string;
   frp: number; // Fire Radiative Power (MW)
 }
@@ -81,11 +88,11 @@ export interface DisasterTweetItem {
   handle: string;
   verified: boolean;
   avatarBadge: string;
-  badgeType: 'Official Agency' | 'OSINT Monitor' | 'Meteorologist' | 'First Responder' | 'Seismology Lab';
+  badgeType: 'Official Agency' | 'OSINT Monitor' | 'Meteorologist' | 'First Responder' | 'Seismology Lab' | string;
   timestamp: string;
   timeAgo: string;
-  disasterType: 'Earthquake' | 'Wildfire' | 'Cyclone / Storm' | 'Tsunami / Floods' | 'Volcano' | 'Extreme Weather';
-  urgency: 'CRITICAL BREAKING' | 'PRIORITY SITREP' | 'ADVISORY' | 'RESOLVED';
+  disasterType: 'Earthquake' | 'Wildfire' | 'Cyclone / Storm' | 'Tsunami / Floods' | 'Volcano' | 'Extreme Weather' | string;
+  urgency: 'CRITICAL BREAKING' | 'PRIORITY SITREP' | 'ADVISORY' | 'RESOLVED' | string;
   text: string;
   location: {
     name: string;
@@ -100,7 +107,7 @@ export interface DisasterTweetItem {
     views?: string;
   };
   media?: {
-    type: 'satellite' | 'radar' | 'seismograph' | 'map' | 'photo';
+    type: 'satellite' | 'radar' | 'seismograph' | 'map' | 'photo' | string;
     caption: string;
     tag: string;
   };
@@ -112,6 +119,7 @@ export interface GeospatialModuleData {
   earthquakes: {
     totalCount: number;
     maxMag: number;
+    maxMagnitude?: number;
     significantCount: number;
     items: EarthquakeItem[];
   };
@@ -122,9 +130,11 @@ export interface GeospatialModuleData {
     highConfidenceCount: number;
     items: FireAnomalyItem[];
   };
+  fireAnomalies?: FireAnomalyItem[];
   disasterFeed: {
     totalActiveDispatches: number;
     criticalCount: number;
+    sourcesMonitored?: number;
     items: DisasterTweetItem[];
   };
 }
@@ -395,3 +405,107 @@ export interface SweepHistorySummary {
   status: string;
   topHeadline: string;
 }
+
+export interface StormItem {
+  id: string;
+  name: string;
+  category: 'Tropical Depression' | 'Category 1' | 'Category 2' | 'Category 3' | 'Category 4' | 'Category 5' | 'Severe Typhoon' | 'Bomb Cyclone';
+  basin: 'West Pacific' | 'North Atlantic' | 'Indian Ocean' | 'East Pacific' | 'Mediterranean';
+  lat: number;
+  lng: number;
+  sustainedWindKmh: number;
+  gustsKmh: number;
+  centralPressureHpa: number;
+  movementHeading: string;
+  movementSpeedKmh: number;
+  forecastTrack: [number, number][];
+  warningStatus: 'Active Warning' | 'Watch' | 'Dissipating';
+}
+
+export interface WindVector {
+  lat: number;
+  lng: number;
+  speedKmh: number;
+  directionDeg: number;
+}
+
+export interface KineticStrikeItem {
+  id: string;
+  title: string;
+  type: 'Missile Strike' | 'Drone Swarm' | 'Border Skirmish' | 'Air Defense Intercept' | 'Naval Interdiction' | 'Civil Unrest / Riot';
+  region: string;
+  country: string;
+  lat: number;
+  lng: number;
+  timestamp: string;
+  casualtyEstimate?: string;
+  actor: string;
+  targetType: string;
+  severity: AlertTier;
+  sourceUrl?: string;
+}
+
+export interface UserLocation {
+  lat: number;
+  lng: number;
+  name: string;
+  isLiveGps: boolean;
+  accuracyMeters?: number;
+}
+
+export interface WhatsAppAlertConfig {
+  enabled: boolean;
+  phoneNumber: string;
+  radiusKm: number;
+  presetName: string;
+  minQuakeMag: number;
+  criticalOnly: boolean;
+  autoDispatch: boolean;
+}
+
+export interface TwelveHourSitrep {
+  timestamp: string;
+  executiveSummary: string;
+  threatLevel: 'LOW' | 'ELEVATED' | 'HIGH' | 'CRITICAL';
+  timelinePoints: {
+    time: string;
+    event: string;
+    domain: 'geospatial' | 'military' | 'infrastructure' | 'markets' | 'health';
+    severity: AlertTier;
+  }[];
+  metricsDelta: {
+    quakesCount12h: number;
+    maxMag12h: number;
+    squawks12h: number;
+    firesCount12h: number;
+    marketVixDelta: number;
+    darkFleetDeviations: number;
+  };
+  keyTakeaways: string[];
+}
+
+export interface WebSdrChannel {
+  id: string;
+  name: string;
+  freqMhz: string;
+  modulation: 'AM' | 'USB' | 'LSB' | 'FM' | 'CW';
+  band: 'Aviation Guard' | 'Military Emergency' | 'Maritime Distress' | 'Strategic HFGCS' | 'Tactical Shortwave';
+  activeSignalDb: number;
+  location: string;
+  status: 'ONLINE' | 'ACTIVE TRAFFIC' | 'JAMMED';
+  description: string;
+}
+
+export interface AssetWatchlistItem {
+  id: string;
+  name: string;
+  callsignOrImo: string;
+  type: 'VIP Government Aircraft' | 'Carrier Strike Group' | 'Recon Submarine' | 'Nuclear Recon Bomber' | 'Strategic Transport';
+  operator: string;
+  lat: number;
+  lng: number;
+  status: 'Active Transponder' | 'Dark / Intermittent' | 'Stationary' | 'Scrambled';
+  lastSeen: string;
+  notes: string;
+}
+

@@ -11,13 +11,20 @@ import {
 } from 'lucide-react';
 import { Header } from './components/Header.js';
 import { DeltaSidebar } from './components/DeltaSidebar.js';
+import { WorldMapProjection } from './components/WorldMapProjection.js';
+import { AiSummary12Hour } from './components/AiSummary12Hour.js';
+import { NotificationCenter } from './components/NotificationCenter.js';
 import { GeospatialPanel } from './components/GeospatialPanel.js';
 import { MarketsPanel } from './components/MarketsPanel.js';
 import { HealthPanel } from './components/HealthPanel.js';
 import { InfrastructurePanel } from './components/InfrastructurePanel.js';
 import { SynthesisPanel } from './components/SynthesisPanel.js';
 import { HistoryModal } from './components/HistoryModal.js';
-import { SweepPayload } from './types.js';
+import { WhatsAppAlertModal } from './components/WhatsAppAlertModal.js';
+import { WebSdrRadioModal } from './components/WebSdrRadioModal.js';
+import { AssetWatchlistModal } from './components/AssetWatchlistModal.js';
+import { MetadataSandboxModal } from './components/MetadataSandboxModal.js';
+import { SweepPayload, UserLocation, WhatsAppAlertConfig } from './types.js';
 import { playFlashAlertChime, playSweepCompleteChime, playTacticalBlip } from './utils/audio.js';
 
 export function App() {
@@ -29,11 +36,77 @@ export function App() {
   const [sweepIntervalMinutes, setSweepIntervalMinutes] = useState<number>(15);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
   const [historyOpen, setHistoryOpen] = useState<boolean>(false);
+  const [whatsAppModalOpen, setWhatsAppModalOpen] = useState<boolean>(false);
+  const [webSdrModalOpen, setWebSdrModalOpen] = useState<boolean>(false);
+  const [watchlistModalOpen, setWatchlistModalOpen] = useState<boolean>(false);
+  const [sandboxModalOpen, setSandboxModalOpen] = useState<boolean>(false);
+
+  // User Focal Location for Proximity Intelligence & Alerting
+  const [userLocation, setUserLocation] = useState<UserLocation>(() => {
+    const saved = localStorage.getItem('crucix_user_location');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        // ignore
+      }
+    }
+    return {
+      lat: 35.6762,
+      lng: 139.6503,
+      name: 'Tokyo, Japan (Default Node)',
+      isLiveGps: false,
+    };
+  });
+
+  // WhatsApp Alert Configuration
+  const [whatsAppConfig, setWhatsAppConfig] = useState<WhatsAppAlertConfig>(() => {
+    const saved = localStorage.getItem('crucix_whatsapp_config');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        // ignore
+      }
+    }
+    return {
+      enabled: false,
+      phoneNumber: '',
+      radiusKm: 500,
+      criticalOnly: true,
+      minQuakeMag: 5.0,
+    };
+  });
+
   const [liteMode, setLiteMode] = useState<boolean>(() => {
-    return (localStorage.getItem('miz_lite_mode') || localStorage.getItem('crucix_lite_mode')) === 'true';
+    return localStorage.getItem('crucix_lite_mode') === 'true';
   });
 
   const eventSourceRef = useRef<EventSource | null>(null);
+
+  // Save location & whatsapp config to localStorage
+  const handleUpdateUserLocation = (loc: UserLocation) => {
+    setUserLocation(loc);
+    localStorage.setItem('crucix_user_location', JSON.stringify(loc));
+  };
+
+  const handleUpdateWhatsAppConfig = (cfg: WhatsAppAlertConfig) => {
+    setWhatsAppConfig(cfg);
+    localStorage.setItem('crucix_whatsapp_config', JSON.stringify(cfg));
+  };
+
+  // Navigate directly to an info desk
+  const handleNavigateToDesk = (deskId: string) => {
+    playTacticalBlip(1400);
+    const element =
+      document.getElementById(`${deskId}-panel`) ||
+      document.getElementById('geospatial-panel') ||
+      document.getElementById('infrastructure-panel');
+
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
 
   // Initialize SSE Connection & Fallback fetch
   useEffect(() => {
@@ -90,14 +163,12 @@ export function App() {
       es.onerror = () => {
         setSseConnected(false);
         es.close();
-        // Retry SSE in 5 seconds
         reconnectTimer = setTimeout(connectSSE, 5000);
       };
     };
 
     connectSSE();
 
-    // Initial fetch fallback
     fetchLatestSweep();
     fetchConfig();
 
@@ -163,8 +234,8 @@ export function App() {
     setNextSweepTimestamp(Date.now() + mins * 60 * 1000);
     try {
       await fetch('/api/config', {
-        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
         body: JSON.stringify({ intervalMinutes: mins }),
       });
     } catch (err) {
@@ -196,12 +267,12 @@ export function App() {
   const handleToggleLiteMode = () => {
     const next = !liteMode;
     setLiteMode(next);
-    localStorage.setItem('miz_lite_mode', next.toString());
+    localStorage.setItem('crucix_lite_mode', next.toString());
   };
 
   return (
     <div className={`min-h-screen bg-[#050505] text-[#d4d4d4] flex flex-col font-sans select-none ${liteMode ? '' : 'tactical-grid'}`}>
-      {/* Top HUD Header */}
+      {/* 1. Top Fixed HUD Header */}
       <Header
         sweep={sweep}
         isSweeping={isSweeping}
@@ -211,11 +282,44 @@ export function App() {
         onTriggerSweep={handleTriggerSweep}
         onChangeInterval={handleChangeInterval}
         onOpenHistory={() => setHistoryOpen(true)}
+        onOpenWhatsAppModal={() => setWhatsAppModalOpen(true)}
+        onOpenWebSdrModal={() => setWebSdrModalOpen(true)}
+        onOpenWatchlistModal={() => setWatchlistModalOpen(true)}
+        onOpenSandboxModal={() => setSandboxModalOpen(true)}
         liteMode={liteMode}
         onToggleLiteMode={handleToggleLiteMode}
       />
 
-      {/* Main Workspace Layout (Sidebar + Grid Content) */}
+      {/* 2. Critical Activity Ticker & Notification Center */}
+      <NotificationCenter
+        alerts={sweep?.alerts || []}
+        userLocation={userLocation}
+        onOpenWhatsAppAlertModal={() => setWhatsAppModalOpen(true)}
+        onNavigateToDesk={handleNavigateToDesk}
+      />
+
+      {/* 3. Full-Width Global Surveillance Radar Projection */}
+      {sweep && (
+        <section id="full-width-global-map-section" className="w-full px-2.5 sm:px-4 py-2 bg-[#02050b] border-b border-[#162338]">
+          <WorldMapProjection
+            earthquakes={sweep?.geospatial?.data?.earthquakes?.items || []}
+            fireAnomalies={sweep?.geospatial?.data?.fireAnomalies || sweep?.geospatial?.data?.thermalAnomalies?.items || []}
+            weatherHubs={sweep?.geospatial?.data?.weatherHubs || []}
+            trackedVessels={sweep?.infrastructure?.data?.maritime?.trackedVessels || []}
+            chokepoints={sweep?.infrastructure?.data?.maritime?.chokepoints || []}
+            emergencySquawks={sweep?.infrastructure?.data?.airTraffic?.emergencySquawks || []}
+            gpsJammingZones={sweep?.infrastructure?.data?.airTraffic?.gpsJammingZones || []}
+            disasterTweets={sweep?.geospatial?.data?.disasterFeed?.items || []}
+            userLocation={userLocation}
+            onUpdateUserLocation={handleUpdateUserLocation}
+            onOpenWhatsAppModal={() => setWhatsAppModalOpen(true)}
+            onNavigateToDesk={handleNavigateToDesk}
+            liteMode={liteMode}
+          />
+        </section>
+      )}
+
+      {/* 4. Main Workspace Layout */}
       <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
         {/* Real-time Delta Stream Sidebar */}
         <DeltaSidebar
@@ -226,7 +330,7 @@ export function App() {
           liteMode={liteMode}
         />
 
-        {/* Primary Command Panels Canvas */}
+        {/* Primary Command Canvas */}
         <main className="flex-1 overflow-y-auto p-3 sm:p-5 space-y-5">
           {!sweep ? (
             <div className="flex flex-col items-center justify-center min-h-[50vh] gap-4 text-center font-mono">
@@ -236,7 +340,7 @@ export function App() {
               </div>
               <div className="space-y-1">
                 <h2 className="text-base font-bold text-white uppercase tracking-widest">
-                  MIZ INTELLIGENCE SWEEP ENGINE
+                  CRUCIX INTELLIGENCE SWEEP ENGINE
                 </h2>
                 <p className="text-xs text-[#888888] max-w-md">
                   Initializing parallel workers across USGS, NOAA, CoinGecko, Europe PMC, CISA KEV, and OpenSky...
@@ -245,52 +349,77 @@ export function App() {
             </div>
           ) : (
             <>
-              {/* 1. AI Cross-Domain Synthesis Briefing (Full Width) */}
+              {/* ========================================================================= */}
+              {/* 12-HOUR CRISIS AI SYNTHESIS & TEMPORAL SITREP                            */}
+              {/* ========================================================================= */}
+              <AiSummary12Hour
+                earthquakes={sweep?.geospatial?.data?.earthquakes?.items || []}
+                disasters={sweep?.geospatial?.data?.disasterFeed?.items || []}
+                emergencySquawks={sweep?.infrastructure?.data?.airTraffic?.emergencySquawks || []}
+                fireAnomalies={sweep?.geospatial?.data?.fireAnomalies || sweep?.geospatial?.data?.thermalAnomalies?.items || []}
+                trackedVessels={sweep?.infrastructure?.data?.maritime?.trackedVessels || []}
+                onOpenDesk={handleNavigateToDesk}
+                liteMode={liteMode}
+              />
+
+              {/* ========================================================================= */}
+              {/* CROSS-DOMAIN AI SYNTHESIS BRIEFING                                       */}
+              {/* ========================================================================= */}
               <SynthesisPanel
-                synthesis={sweep.synthesis}
+                synthesis={sweep?.synthesis}
                 onResynthesize={handleResynthesize}
                 isSynthesizing={isSynthesizing}
                 liteMode={liteMode}
               />
 
-              {/* 2. Primary 2x2 Intelligence Matrix Grid */}
+              {/* ========================================================================= */}
+              {/* PRIMARY 2x2 DOMAIN INTELLIGENCE DESKS MATRIX                             */}
+              {/* ========================================================================= */}
               <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
-                {/* Geospatial & Hazards Matrix */}
-                <GeospatialPanel
-                  telemetry={sweep.geospatial}
-                  infrastructureTelemetry={sweep.infrastructure}
-                  liteMode={liteMode}
-                />
+                {/* 1. Geospatial & Hazards Desk */}
+                {sweep?.geospatial && (
+                  <GeospatialPanel
+                    telemetry={sweep.geospatial}
+                    infrastructureTelemetry={sweep.infrastructure}
+                    liteMode={liteMode}
+                  />
+                )}
 
-                {/* Markets & Macro Telemetry */}
-                <MarketsPanel
-                  telemetry={sweep.markets}
-                  liteMode={liteMode}
-                />
+                {/* 2. Infrastructure, Maritime, Air Traffic & Cyber Desk */}
+                {sweep?.infrastructure && (
+                  <InfrastructurePanel
+                    telemetry={sweep.infrastructure}
+                    liteMode={liteMode}
+                  />
+                )}
 
-                {/* Public Health & Emerging Bio-Research */}
-                <HealthPanel
-                  telemetry={sweep.health}
-                  liteMode={liteMode}
-                />
+                {/* 3. Markets, Macro & Sanctions Desk */}
+                {sweep?.markets && (
+                  <MarketsPanel
+                    telemetry={sweep.markets}
+                    liteMode={liteMode}
+                  />
+                )}
 
-                {/* Infrastructure, Cyber & Airspace OSINT */}
-                <InfrastructurePanel
-                  telemetry={sweep.infrastructure}
-                  liteMode={liteMode}
-                />
+                {/* 4. Public Health & Bio-Research Desk */}
+                {sweep?.health && (
+                  <HealthPanel
+                    telemetry={sweep.health}
+                    liteMode={liteMode}
+                  />
+                )}
               </div>
 
               {/* Footer System Telemetry */}
               <footer className="pt-4 pb-6 border-t border-[#1a1a1a] flex flex-wrap items-center justify-between gap-3 text-[11px] font-mono text-[#737373]">
                 <div className="flex items-center gap-3">
-                  <span className="text-[#00ff41] font-bold">MIZ OSINT NODE v3.4</span>
+                  <span className="text-[#00ff41] font-bold">CRUCIX OSINT NODE v3.5</span>
                   <span>•</span>
-                  <span>Pure ESM Architecture</span>
+                  <span>Photorealistic Earth Vector Projection</span>
                   <span>•</span>
-                  <span>Zero-DB Atomic Persistence</span>
+                  <span>Proximity WhatsApp Dispatch</span>
                   <span>•</span>
-                  <span>SSE Active</span>
+                  <span>12h AI Temporal Sitrep</span>
                 </div>
                 <div>
                   Last Sweep: {new Date(sweep.timestamp).toLocaleString()} ({sweep.sweepDurationMs}ms)
@@ -301,7 +430,43 @@ export function App() {
         </main>
       </div>
 
-      {/* History Snapshots Modal */}
+      {/* WhatsApp Disaster Alert & Proximity Dispatcher Modal */}
+      <WhatsAppAlertModal
+        isOpen={whatsAppModalOpen}
+        onClose={() => setWhatsAppModalOpen(false)}
+        userLocation={userLocation}
+        onUpdateUserLocation={handleUpdateUserLocation}
+        config={whatsAppConfig}
+        onUpdateConfig={handleUpdateWhatsAppConfig}
+        disasters={sweep?.geospatial?.data?.disasterFeed?.items || []}
+        earthquakes={sweep?.geospatial?.data?.earthquakes?.items || []}
+      />
+
+      {/* WebSDR SIGINT Radio & Military Scanner Modal */}
+      <WebSdrRadioModal
+        isOpen={webSdrModalOpen}
+        onClose={() => setWebSdrModalOpen(false)}
+      />
+
+      {/* High-Value Asset Watchlist Modal */}
+      <AssetWatchlistModal
+        isOpen={watchlistModalOpen}
+        onClose={() => setWatchlistModalOpen(false)}
+        onSelectCoordinate={(lat, lng) => {
+          const mapEl = document.getElementById('top-global-radar-map');
+          if (mapEl) {
+            mapEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }
+        }}
+      />
+
+      {/* Geolocation, Sun-Shadow, and Wayback Verification Sandbox */}
+      <MetadataSandboxModal
+        isOpen={sandboxModalOpen}
+        onClose={() => setSandboxModalOpen(false)}
+      />
+
+      {/* Historical Snapshots Modal */}
       <HistoryModal
         isOpen={historyOpen}
         onClose={() => setHistoryOpen(false)}

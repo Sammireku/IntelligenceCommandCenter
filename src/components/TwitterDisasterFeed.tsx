@@ -20,30 +20,37 @@ import {
 import { DisasterTweetItem } from '../types.js';
 
 interface TwitterDisasterFeedProps {
-  dispatches: DisasterTweetItem[];
+  dispatches?: DisasterTweetItem[];
+  tweets?: DisasterTweetItem[];
+  lastUpdated?: number;
+  sourceCount?: number;
   onSelectCoordinate?: (lat: number, lng: number, item: DisasterTweetItem) => void;
   liteMode?: boolean;
 }
 
 export const TwitterDisasterFeed: React.FC<TwitterDisasterFeedProps> = ({
-  dispatches = [],
+  dispatches,
+  tweets,
+  lastUpdated,
+  sourceCount = 14,
   onSelectCoordinate,
   liteMode = false,
 }) => {
+  const feedItems = tweets || dispatches || [];
   const [selectedType, setSelectedType] = useState<string>('ALL');
   const [selectedUrgency, setSelectedUrgency] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [soundEnabled, setSoundEnabled] = useState<boolean>(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  const filteredDispatches = dispatches.filter((d) => {
+  const filteredDispatches = feedItems.filter((d) => {
     if (selectedType !== 'ALL' && d.disasterType !== selectedType) return false;
     if (selectedUrgency !== 'ALL' && d.urgency !== selectedUrgency) return false;
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
-      const matchText = d.text.toLowerCase().includes(q);
-      const matchAuthor = d.authorName.toLowerCase().includes(q) || d.handle.toLowerCase().includes(q);
-      const matchLoc = d.location.name.toLowerCase().includes(q) || d.location.country.toLowerCase().includes(q);
+      const matchText = d.text ? d.text.toLowerCase().includes(q) : false;
+      const matchAuthor = (d.authorName?.toLowerCase().includes(q)) || (d.handle?.toLowerCase().includes(q));
+      const matchLoc = (d.location?.name?.toLowerCase().includes(q)) || (d.location?.country?.toLowerCase().includes(q));
       if (!matchText && !matchAuthor && !matchLoc) return false;
     }
     return true;
@@ -114,16 +121,16 @@ export const TwitterDisasterFeed: React.FC<TwitterDisasterFeedProps> = ({
       </div>
 
       {/* Breaking Ticker Banner */}
-      {dispatches.some((d) => d.urgency === 'CRITICAL BREAKING') && (
+      {feedItems.some((d) => d.urgency === 'CRITICAL BREAKING') && (
         <div className="p-2.5 rounded bg-rose-950/20 border border-rose-800/40 flex items-start gap-2 text-xs font-mono text-rose-200">
           <span className="px-1.5 py-0.5 rounded bg-rose-900/60 text-rose-300 font-bold uppercase tracking-wider text-[10px] animate-pulse shrink-0">
             CRITICAL DISPATCH
           </span>
           <div className="truncate">
             <strong className="text-white">
-              {dispatches.find((d) => d.urgency === 'CRITICAL BREAKING')?.authorName}:
+              {feedItems.find((d) => d.urgency === 'CRITICAL BREAKING')?.authorName}:
             </strong>{' '}
-            {dispatches.find((d) => d.urgency === 'CRITICAL BREAKING')?.text}
+            {feedItems.find((d) => d.urgency === 'CRITICAL BREAKING')?.text}
           </div>
         </div>
       )}

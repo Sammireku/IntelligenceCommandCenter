@@ -20,10 +20,20 @@ interface MarketsPanelProps {
 }
 
 export const MarketsPanel: React.FC<MarketsPanelProps> = ({ telemetry, liteMode = false }) => {
-  const { data, status, latencyMs, error } = telemetry;
+  const { data, status, latencyMs, error } = telemetry || {};
   const [selectedCategory, setSelectedCategory] = useState<'all' | 'crypto' | 'index' | 'commodity' | 'yield'>('all');
 
-  const filteredTickers = data.tickers.filter((t) => {
+  const tickers = data?.tickers || [];
+  const macro = data?.macro || [];
+  const marketStatus = data?.marketStatus || {
+    dominantTrend: 'Liquidity Expansion',
+    spread10Y2Y: 0.15,
+    yieldCurveInversion: false,
+    crypto24hVol: '$84.2B',
+    volatilityIndex: 14.8,
+  };
+
+  const filteredTickers = tickers.filter((t) => {
     if (selectedCategory === 'all') return true;
     return t.category === selectedCategory;
   });
@@ -113,7 +123,7 @@ export const MarketsPanel: React.FC<MarketsPanelProps> = ({ telemetry, liteMode 
           <div>
             <div className="text-[#666666] text-[10px] uppercase">Dominant Macro Regime</div>
             <div className="text-base font-bold text-neutral-100 mt-0.5">
-              {data.marketStatus.dominantTrend}
+              {marketStatus.dominantTrend}
             </div>
           </div>
           <div className="px-2 py-1 rounded bg-[#00ff41]/10 border border-[#00ff41]/30 text-[#00ff41] text-[11px] font-bold">
@@ -125,11 +135,11 @@ export const MarketsPanel: React.FC<MarketsPanelProps> = ({ telemetry, liteMode 
           <div>
             <div className="text-[#666666] text-[10px] uppercase">10Y-2Y Yield Curve Spread</div>
             <div className="text-base font-bold text-[#00d1ff] mt-0.5">
-              +{data.marketStatus.spread10Y2Y}%
+              +{marketStatus.spread10Y2Y}%
             </div>
           </div>
           <span className="text-[10px] px-2 py-1 rounded bg-[#141414] border border-[#262626] text-[#a3a3a3]">
-            {data.marketStatus.yieldCurveInversion ? 'INVERTED' : 'NORMALIZED'}
+            {marketStatus.yieldCurveInversion ? 'INVERTED' : 'NORMALIZED'}
           </span>
         </div>
 
@@ -137,10 +147,10 @@ export const MarketsPanel: React.FC<MarketsPanelProps> = ({ telemetry, liteMode 
           <div>
             <div className="text-[#666666] text-[10px] uppercase">24H Crypto Volume</div>
             <div className="text-base font-bold text-neutral-100 mt-0.5">
-              {data.marketStatus.crypto24hVol}
+              {marketStatus.crypto24hVol}
             </div>
           </div>
-          <span className="text-[10px] text-[#737373]">VIX Proxy: {data.marketStatus.volatilityIndex}</span>
+          <span className="text-[10px] text-[#737373]">VIX Proxy: {marketStatus.volatilityIndex}</span>
         </div>
       </div>
 
@@ -201,7 +211,7 @@ export const MarketsPanel: React.FC<MarketsPanelProps> = ({ telemetry, liteMode 
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 font-mono text-xs">
-          {data.macro.map((m) => (
+          {macro.map((m) => (
             <div key={m.code} className="p-2.5 rounded bg-[#0c0c0c] border border-[#1a1a1a] space-y-1">
               <div className="flex items-center justify-between text-[#888888] text-[11px]">
                 <span className="font-medium text-[#d4d4d4]">{m.name}</span>

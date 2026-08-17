@@ -26,7 +26,7 @@ interface DeltaSidebarProps {
 
 export const DeltaSidebar: React.FC<DeltaSidebarProps> = ({
   delta,
-  alerts,
+  alerts = [],
   collapsed,
   onToggleCollapse,
   liteMode = false,
@@ -35,14 +35,15 @@ export const DeltaSidebar: React.FC<DeltaSidebarProps> = ({
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [expandedAlertId, setExpandedAlertId] = useState<string | null>(null);
 
-  const filteredAlerts = alerts.filter((alert) => {
+  const alertItems = alerts || [];
+  const filteredAlerts = alertItems.filter((alert) => {
     if (selectedTier !== 'ALL' && alert.tier !== selectedTier) return false;
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       return (
-        alert.title.toLowerCase().includes(q) ||
-        alert.summary.toLowerCase().includes(q) ||
-        alert.domain.toLowerCase().includes(q)
+        (alert.title && alert.title.toLowerCase().includes(q)) ||
+        (alert.summary && alert.summary.toLowerCase().includes(q)) ||
+        (alert.domain && alert.domain.toLowerCase().includes(q))
       );
     }
     return true;
@@ -159,7 +160,7 @@ export const DeltaSidebar: React.FC<DeltaSidebarProps> = ({
         )}
 
         {/* Delta Change Items Log */}
-        {delta && delta.changes.length > 0 && (
+        {delta && delta.changes && delta.changes.length > 0 && (
           <div className="bg-[#050505] border border-[#1a1a1a] rounded p-2 text-[10px] font-mono max-h-24 overflow-y-auto mb-2 space-y-1">
             <div className="text-[#888888] uppercase tracking-widest text-[9px] font-bold">
               Delta State Transitions ({delta.changes.length})

@@ -11,17 +11,22 @@ import {
   Layers,
   MapPin,
   Maximize2,
+  Minimize2,
   Navigation,
   Plane,
   Radio,
   RefreshCw,
   Search,
+  Send,
+  Shield,
   ShieldAlert,
   Ship,
   Sparkles,
   Sun,
+  Volume2,
   Waves,
   Wind,
+  X,
   Zap,
 } from 'lucide-react';
 import {
@@ -30,10 +35,23 @@ import {
   FireAnomalyItem,
   FlightAnomalyItem,
   GpsJammingZoneItem,
+  KineticStrikeItem,
   MaritimeChokepointItem,
   MaritimeVesselItem,
+  StormItem,
+  UserLocation,
   WeatherHubItem,
+  WindVector,
 } from '../types.js';
+import {
+  ACTIVE_GLOBAL_STORMS,
+  ACTIVE_KINETIC_STRIKES,
+  GLOBAL_WIND_VECTORS,
+  calculateDistanceKm,
+  generateWhatsAppAlertUrl,
+} from '../utils/geoIntelligence.js';
+import { playTacticalBlip } from '../utils/audio.js';
+import { EntityDetailCard, SelectedEntityData } from './EntityDetailCard.js';
 
 interface WorldMapProjectionProps {
   earthquakes?: EarthquakeItem[];
@@ -44,17 +62,23 @@ interface WorldMapProjectionProps {
   emergencySquawks?: FlightAnomalyItem[];
   gpsJammingZones?: GpsJammingZoneItem[];
   disasterTweets?: DisasterTweetItem[];
+  userLocation: UserLocation;
+  onUpdateUserLocation: (loc: UserLocation) => void;
+  onOpenWhatsAppModal: () => void;
+  onNavigateToDesk: (deskId: string) => void;
   liteMode?: boolean;
 }
 
-// 2D Equirectangular projection (800 x 400 SVG space)
+// 2D Projection helper (1000 x 500 SVG canvas for ultra crisp full-width detail)
 function project2D(lng: number, lat: number): [number, number] {
-  const x = ((lng + 180) / 360) * 800;
-  const y = ((90 - lat) / 180) * 400;
+  const safeLng = isNaN(lng) ? 0 : Math.max(-180, Math.min(180, lng));
+  const safeLat = isNaN(lat) ? 0 : Math.max(-85, Math.min(85, lat));
+  const x = ((safeLng + 180) / 360) * 1000;
+  const y = ((90 - safeLat) / 180) * 500;
   return [x, y];
 }
 
-// 3D Orthographic projection to a sphere with radius R centered at (cx, cy)
+// 3D Orthographic projection to sphere
 function project3D(
   lng: number,
   lat: number,
@@ -64,17 +88,19 @@ function project3D(
   cx: number,
   cy: number
 ): { x: number; y: number; visible: boolean; cosC: number } {
+  const safeLng = isNaN(lng) ? 0 : lng;
+  const safeLat = isNaN(lat) ? 0 : lat;
   const rad = Math.PI / 180;
-  const phi = lat * rad;
-  const lambda = lng * rad;
-  const phi0 = rotLat * rad;
-  const lambda0 = rotLng * rad;
+  const phi = safeLat * rad;
+  const lambda = safeLng * rad;
+  const phi0 = (rotLat || 0) * rad;
+  const lambda0 = (rotLng || 0) * rad;
 
   const cosC =
     Math.sin(phi0) * Math.sin(phi) +
     Math.cos(phi0) * Math.cos(phi) * Math.cos(lambda - lambda0);
 
-  const visible = cosC > 0.05; // Visible on the front hemisphere
+  const visible = cosC > 0.05;
 
   const x = cx + radius * Math.cos(phi) * Math.sin(lambda - lambda0);
   const y =
@@ -83,59 +109,288 @@ function project3D(
       (Math.cos(phi0) * Math.sin(phi) -
         Math.sin(phi0) * Math.cos(phi) * Math.cos(lambda - lambda0));
 
-  return { x, y, visible, cosC };
+  return { x: isNaN(x) ? cx : x, y: isNaN(y) ? cy : y, visible, cosC };
 }
 
-// Vector continent definition for 3D & 2D rendering
-const CONTINENTS: { name: string; points: [number, number][] }[] = [
+// HIGH-FIDELITY REALISTIC CONTINENT & REGION VECTOR POLYGONS
+interface Landmass {
+  name: string;
+  points: [number, number][];
+  biomeGradient: string;
+  elevationRidge?: [number, number][];
+}
+
+const HIGH_RES_LANDMASSES: Landmass[] = [
+  // 1. NORTH AMERICA
   {
-    name: 'North America',
+    name: 'North America Main',
     points: [
-      [-165, 68], [-140, 70], [-100, 72], [-65, 60], [-55, 50], [-70, 42],
-      [-80, 25], [-90, 20], [-105, 20], [-115, 30], [-125, 48], [-165, 60],
+      [-168, 65], [-162, 70], [-150, 71], [-135, 69], [-120, 74], [-105, 74],
+      [-95, 73], [-82, 65], [-76, 58], [-64, 60], [-55, 52], [-60, 46],
+      [-66, 44], [-70, 42], [-75, 38], [-76, 35], [-80, 31], [-81, 25],
+      [-82, 28], [-88, 30], [-94, 29], [-97, 26], [-97, 21], [-92, 18],
+      [-88, 21], [-83, 15], [-77, 8], [-80, 8], [-84, 10], [-90, 14],
+      [-96, 16], [-102, 19], [-106, 23], [-110, 24], [-115, 30], [-117, 32],
+      [-121, 35], [-124, 40], [-124, 48], [-128, 52], [-134, 57], [-145, 60],
+      [-155, 58], [-165, 59], [-168, 65],
+    ],
+    biomeGradient: 'url(#biome-north-america)',
+    elevationRidge: [
+      [-120, 52], [-115, 45], [-110, 40], [-107, 34], [-103, 26],
     ],
   },
   {
-    name: 'Central America',
-    points: [[-90, 20], [-80, 10], [-77, 8], [-85, 12], [-100, 18]],
+    name: 'Alaska Peninsula & Aleutian Arc',
+    points: [
+      [-165, 59], [-160, 56], [-155, 58], [-150, 60], [-142, 60], [-145, 61],
+      [-155, 63], [-164, 62],
+    ],
+    biomeGradient: 'url(#biome-taiga)',
   },
   {
-    name: 'South America',
+    name: 'Greenland Ice Sheet',
     points: [
-      [-75, 10], [-60, 5], [-35, -5], [-38, -18], [-55, -35], [-68, -55],
-      [-75, -45], [-72, -20], [-80, -2],
+      [-50, 60], [-42, 60], [-35, 65], [-20, 70], [-18, 77], [-25, 82],
+      [-40, 83], [-55, 82], [-60, 76], [-55, 70], [-52, 65],
+    ],
+    biomeGradient: 'url(#biome-ice)',
+  },
+  {
+    name: 'Canadian Arctic Archipelago',
+    points: [
+      [-110, 74], [-95, 76], [-80, 78], [-70, 74], [-75, 70], [-90, 69],
+      [-105, 70],
+    ],
+    biomeGradient: 'url(#biome-ice)',
+  },
+
+  // 2. CARIBBEAN ISLANDS
+  {
+    name: 'Cuba',
+    points: [[-84, 22], [-80, 23], [-75, 20], [-77, 19], [-83, 21]],
+    biomeGradient: 'url(#biome-rainforest)',
+  },
+  {
+    name: 'Hispaniola & Puerto Rico',
+    points: [[-74, 19], [-70, 19], [-66, 18], [-68, 17], [-73, 18]],
+    biomeGradient: 'url(#biome-rainforest)',
+  },
+
+  // 3. SOUTH AMERICA
+  {
+    name: 'South America Main',
+    points: [
+      [-77, 8], [-72, 11], [-65, 11], [-60, 8], [-52, 4], [-45, -1],
+      [-36, -5], [-35, -9], [-38, -13], [-40, -18], [-44, -23], [-49, -28],
+      [-54, -34], [-60, -38], [-65, -43], [-67, -50], [-68, -55], [-72, -54],
+      [-74, -50], [-75, -45], [-72, -38], [-71, -30], [-74, -20], [-77, -12],
+      [-81, -5], [-80, 1], [-77, 8],
+    ],
+    biomeGradient: 'url(#biome-south-america)',
+    elevationRidge: [
+      [-76, 6], [-74, -5], [-72, -15], [-70, -25], [-71, -36], [-73, -48],
+    ],
+  },
+
+  // 4. EUROPE
+  {
+    name: 'Europe Main',
+    points: [
+      [-9, 38], [-9, 43], [-3, 44], [-1, 47], [4, 49], [9, 54], [14, 55],
+      [22, 56], [28, 59], [30, 68], [40, 67], [50, 64], [55, 60], [48, 50],
+      [42, 46], [35, 45], [30, 42], [24, 38], [22, 36], [16, 38], [14, 42],
+      [9, 44], [3, 42], [-2, 37], [-6, 36],
+    ],
+    biomeGradient: 'url(#biome-europe)',
+    elevationRidge: [[6, 46], [10, 46], [14, 46]],
+  },
+  {
+    name: 'British Isles & Ireland',
+    points: [
+      [-5, 50], [-1, 51], [1, 53], [-1, 57], [-4, 58], [-6, 55], [-4, 52],
+    ],
+    biomeGradient: 'url(#biome-europe)',
+  },
+  {
+    name: 'Ireland',
+    points: [[-10, 52], [-8, 54], [-6, 54], [-6, 52], [-9, 51]],
+    biomeGradient: 'url(#biome-europe)',
+  },
+  {
+    name: 'Scandinavia (Norway & Sweden)',
+    points: [
+      [5, 59], [9, 58], [13, 56], [18, 60], [24, 65], [29, 70], [22, 71],
+      [14, 68], [8, 63], [5, 59],
+    ],
+    biomeGradient: 'url(#biome-taiga)',
+  },
+  {
+    name: 'Italy & Sicily',
+    points: [
+      [9, 44], [12, 44], [16, 41], [18, 40], [16, 38], [14, 37], [13, 40],
+      [11, 43],
+    ],
+    biomeGradient: 'url(#biome-europe)',
+  },
+
+  // 5. AFRICA
+  {
+    name: 'Africa Main',
+    points: [
+      [-17, 30], [-10, 35], [-2, 36], [8, 37], [16, 32], [26, 32], [32, 31],
+      [34, 27], [37, 22], [42, 15], [51, 12], [47, 7], [42, 0], [40, -10],
+      [35, -22], [32, -28], [28, -33], [20, -34], [16, -29], [12, -18],
+      [10, -5], [8, 4], [3, 6], [-5, 5], [-12, 7], [-17, 14], [-17, 24],
+      [-17, 30],
+    ],
+    biomeGradient: 'url(#biome-africa)',
+    elevationRidge: [
+      [36, 12], [38, 5], [36, -5], [34, -15],
     ],
   },
   {
-    name: 'Eurasia',
+    name: 'Madagascar',
     points: [
-      [-10, 36], [0, 42], [15, 55], [30, 70], [60, 73], [100, 75], [170, 68],
-      [140, 50], [120, 35], [105, 20], [80, 10], [60, 25], [40, 30], [25, 35],
-      [10, 36],
+      [47, -13], [50, -16], [48, -23], [44, -25], [44, -19], [46, -15],
+    ],
+    biomeGradient: 'url(#biome-rainforest)',
+  },
+
+  // 6. MIDDLE EAST
+  {
+    name: 'Arabian Peninsula & Levant',
+    points: [
+      [34, 31], [40, 33], [46, 31], [50, 28], [55, 25], [60, 22], [58, 16],
+      [52, 14], [45, 13], [42, 16], [38, 22], [35, 27],
+    ],
+    biomeGradient: 'url(#biome-desert)',
+  },
+
+  // 7. ASIA & EURASIA
+  {
+    name: 'Asia Main (Eurasian Landmass)',
+    points: [
+      [55, 60], [65, 68], [75, 72], [90, 75], [110, 76], [130, 73],
+      [150, 71], [170, 68], [178, 65], [170, 60], [160, 56], [155, 52],
+      [145, 48], [135, 42], [125, 40], [120, 34], [118, 25], [110, 20],
+      [105, 14], [101, 8], [98, 14], [92, 21], [85, 22], [78, 28], [72, 24],
+      [68, 25], [60, 25], [52, 33], [48, 40], [48, 50], [55, 60],
+    ],
+    biomeGradient: 'url(#biome-asia)',
+    elevationRidge: [
+      [75, 35], [85, 32], [95, 30], [102, 28],
     ],
   },
   {
-    name: 'Africa',
+    name: 'Indian Subcontinent',
     points: [
-      [-15, 30], [10, 37], [32, 31], [50, 12], [42, -10], [30, -32],
-      [18, -34], [10, -5], [-15, 12],
+      [68, 24], [74, 28], [82, 26], [88, 22], [84, 16], [80, 10], [77, 8],
+      [73, 14], [70, 19],
     ],
+    biomeGradient: 'url(#biome-rainforest)',
   },
   {
-    name: 'Australia',
+    name: 'Sri Lanka',
+    points: [[80, 9], [81, 8], [81, 6], [80, 6]],
+    biomeGradient: 'url(#biome-rainforest)',
+  },
+  {
+    name: 'Korean Peninsula',
+    points: [[125, 39], [129, 38], [129, 35], [126, 35]],
+    biomeGradient: 'url(#biome-asia)',
+  },
+  {
+    name: 'Japan Archipelago (Honshu, Hokkaido, Kyushu)',
     points: [
-      [115, -22], [130, -12], [145, -15], [150, -35], [135, -38],
-      [115, -34],
+      [141, 45], [145, 44], [141, 41], [138, 37], [133, 34], [130, 32],
+      [131, 34], [136, 36], [140, 39],
     ],
+    biomeGradient: 'url(#biome-europe)',
   },
   {
-    name: 'Japan & Maritime East Asia',
-    points: [[130, 32], [142, 44], [140, 36], [132, 30]],
+    name: 'Taiwan',
+    points: [[120, 25], [122, 25], [121, 22], [120, 22]],
+    biomeGradient: 'url(#biome-rainforest)',
   },
   {
-    name: 'Greenland',
-    points: [[-50, 60], [-20, 70], [-25, 82], [-60, 80]],
+    name: 'Philippines Archipelago',
+    points: [
+      [120, 18], [123, 17], [125, 13], [126, 8], [122, 6], [120, 10],
+      [118, 14],
+    ],
+    biomeGradient: 'url(#biome-rainforest)',
   },
+  {
+    name: 'Indonesian Archipelago (Sumatra, Java, Borneo, Papua)',
+    points: [
+      [96, 4], [102, 1], [106, -5], [112, -7], [118, -8], [125, -8],
+      [135, -4], [140, -3], [145, -6], [140, -8], [130, -5], [120, -2],
+      [110, 0], [100, 3],
+    ],
+    biomeGradient: 'url(#biome-rainforest)',
+  },
+
+  // 8. OCEANIA & AUSTRALIA
+  {
+    name: 'Australia Main',
+    points: [
+      [114, -22], [120, -18], [130, -12], [138, -16], [143, -12], [148, -18],
+      [153, -27], [150, -34], [144, -38], [136, -35], [128, -32], [118, -35],
+      [114, -28], [114, -22],
+    ],
+    biomeGradient: 'url(#biome-australia)',
+    elevationRidge: [[148, -20], [150, -28], [146, -36]],
+  },
+  {
+    name: 'Tasmania',
+    points: [[145, -41], [148, -41], [148, -43], [145, -43]],
+    biomeGradient: 'url(#biome-europe)',
+  },
+  {
+    name: 'New Zealand',
+    points: [
+      [173, -35], [177, -38], [174, -42], [170, -45], [167, -46], [170, -42],
+    ],
+    biomeGradient: 'url(#biome-europe)',
+  },
+
+  // 9. ANTARCTICA
+  {
+    name: 'Antarctica Continent',
+    points: [
+      [-180, -78], [-140, -74], [-90, -72], [-65, -64], [-55, -66],
+      [-30, -70], [0, -68], [40, -67], [80, -66], [120, -65], [160, -72],
+      [180, -78], [180, -85], [-180, -85],
+    ],
+    biomeGradient: 'url(#biome-ice)',
+  },
+];
+
+// Major Global Megacities for Realistic Night Lights
+const GLOBAL_CITY_LIGHTS: { name: string; lat: number; lng: number; intensity: number }[] = [
+  { name: 'Tokyo', lat: 35.67, lng: 139.65, intensity: 1.0 },
+  { name: 'Shanghai', lat: 31.23, lng: 121.47, intensity: 0.95 },
+  { name: 'Beijing', lat: 39.9, lng: 116.4, intensity: 0.9 },
+  { name: 'Seoul', lat: 37.56, lng: 126.97, intensity: 0.9 },
+  { name: 'Guangzhou / HK', lat: 22.8, lng: 113.8, intensity: 1.0 },
+  { name: 'Delhi', lat: 28.61, lng: 77.2, intensity: 0.9 },
+  { name: 'Mumbai', lat: 19.07, lng: 72.87, intensity: 0.85 },
+  { name: 'Dubai', lat: 25.2, lng: 55.27, intensity: 0.9 },
+  { name: 'Singapore', lat: 1.35, lng: 103.82, intensity: 0.95 },
+  { name: 'London', lat: 51.5, lng: -0.12, intensity: 0.95 },
+  { name: 'Paris', lat: 48.85, lng: 2.35, intensity: 0.9 },
+  { name: 'Frankfurt / Rhine', lat: 50.11, lng: 8.68, intensity: 0.85 },
+  { name: 'Moscow', lat: 55.75, lng: 37.61, intensity: 0.8 },
+  { name: 'Cairo', lat: 30.04, lng: 31.23, intensity: 0.8 },
+  { name: 'New York', lat: 40.71, lng: -74.0, intensity: 1.0 },
+  { name: 'Chicago', lat: 41.87, lng: -87.62, intensity: 0.85 },
+  { name: 'Los Angeles', lat: 34.05, lng: -118.24, intensity: 0.95 },
+  { name: 'San Francisco', lat: 37.77, lng: -122.41, intensity: 0.85 },
+  { name: 'Mexico City', lat: 19.43, lng: -99.13, intensity: 0.85 },
+  { name: 'São Paulo', lat: -23.55, lng: -46.63, intensity: 0.9 },
+  { name: 'Buenos Aires', lat: -34.6, lng: -58.38, intensity: 0.75 },
+  { name: 'Johannesburg', lat: -26.2, lng: 28.04, intensity: 0.7 },
+  { name: 'Sydney', lat: -33.86, lng: 151.2, intensity: 0.8 },
 ];
 
 export const WorldMapProjection: React.FC<WorldMapProjectionProps> = ({
@@ -147,1363 +402,1402 @@ export const WorldMapProjection: React.FC<WorldMapProjectionProps> = ({
   emergencySquawks = [],
   gpsJammingZones = [],
   disasterTweets = [],
+  userLocation,
+  onUpdateUserLocation,
+  onOpenWhatsAppModal,
+  onNavigateToDesk,
   liteMode = false,
 }) => {
-  // Projection mode: 2D tactical map or 3D interactive HUD globe
-  const [projectionMode, setProjectionMode] = useState<'2d' | '3d'>('3d');
-
-  // Layer Visibility Toggles
-  const [showVessels, setShowVessels] = useState(true);
-  const [showFlights, setShowFlights] = useState(true);
-  const [showChokepoints, setShowChokepoints] = useState(true);
-  const [showGpsJamming, setShowGpsJamming] = useState(true);
-  const [showQuakes, setShowQuakes] = useState(true);
-  const [showFires, setShowFires] = useState(true);
-  const [showDisasters, setShowDisasters] = useState(true);
-  const [showWeather, setShowWeather] = useState(false);
-
-  // Selected Entity State for rich Inspector card
-  const [selectedEntity, setSelectedEntity] = useState<{
-    type: 'vessel' | 'flight' | 'chokepoint' | 'jamming' | 'quake' | 'fire' | 'disaster' | 'weather';
-    data: any;
-    screenCoords?: [number, number];
-  } | null>(null);
-
-  // 3D Globe Rotation & Drag State
-  const [rotLng, setRotLng] = useState<number>(35); // Center near Middle East / Europe by default
-  const [rotLat, setRotLat] = useState<number>(18);
-  const [isDragging, setIsDragging] = useState<boolean>(false);
-  const [autoRotate, setAutoRotate] = useState<boolean>(true);
+  const [viewMode, setViewMode] = useState<'2d' | '3d'>('2d');
   const [zoomLevel, setZoomLevel] = useState<number>(1);
-  const dragStartRef = useRef<{ x: number; y: number; startLng: number; startLat: number } | null>(null);
+  const [panOffset, setPanOffset] = useState<[number, number]>([0, 0]);
+  const [isDragging, setIsDragging] = useState<boolean>(false);
+  const [dragStart, setDragStart] = useState<[number, number]>([0, 0]);
+  const [selectedEntity, setSelectedEntity] = useState<SelectedEntityData | null>(null);
+  const [radarSweepAngle, setRadarSweepAngle] = useState<number>(0);
+  const [autoRotate, setAutoRotate] = useState<boolean>(false);
+  const [globeRotation, setGlobeRotation] = useState<[number, number]>([15, 12]);
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+  const [nightModeTerminator, setNightModeTerminator] = useState<boolean>(true);
 
-  // Cursor coordinates tracking
-  const [hoverCoords, setHoverCoords] = useState<{ lat: number; lng: number } | null>(null);
+  // Layer Toggles
+  const [layers, setLayers] = useState({
+    userFocal: true,
+    flights: true,
+    vessels: true,
+    chokepoints: true,
+    earthquakes: true,
+    wildfires: true,
+    storms: true,
+    windFlow: true,
+    disasters: true,
+    gpsJamming: true,
+    strikes: true,
+    topography: true,
+    cityLights: true,
+  });
 
-  // Auto-rotate 3D globe animation loop
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  // Radar sweep animation
   useEffect(() => {
-    if (projectionMode !== '3d' || !autoRotate || isDragging) return;
-    const interval = setInterval(() => {
-      setRotLng((prev) => (prev + 0.25) % 360);
-    }, 50);
-    return () => clearInterval(interval);
-  }, [projectionMode, autoRotate, isDragging]);
-
-  // Mouse / Touch handlers for 3D globe drag rotation
-  const handleMouseDown = (e: React.MouseEvent) => {
-    if (projectionMode !== '3d') return;
-    setIsDragging(true);
-    setAutoRotate(false);
-    dragStartRef.current = {
-      x: e.clientX,
-      y: e.clientY,
-      startLng: rotLng,
-      startLat: rotLat,
+    let animFrame: number;
+    const animate = () => {
+      setRadarSweepAngle((prev) => (prev + 1.0) % 360);
+      if (autoRotate && viewMode === '3d') {
+        setGlobeRotation(([lng, lat]) => [(lng + 0.3) % 360, lat]);
+      }
+      animFrame = requestAnimationFrame(animate);
     };
-  };
+    animFrame = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(animFrame);
+  }, [autoRotate, viewMode]);
 
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (isDragging && dragStartRef.current && projectionMode === '3d') {
-      const dx = e.clientX - dragStartRef.current.x;
-      const dy = e.clientY - dragStartRef.current.y;
-      const sensitivity = 0.4;
-      const newLng = (dragStartRef.current.startLng - dx * sensitivity) % 360;
-      const newLat = Math.max(-80, Math.min(80, dragStartRef.current.startLat + dy * sensitivity));
-      setRotLng(newLng);
-      setRotLat(newLat);
+  // Center on user focal point
+  const handleCenterOnUser = () => {
+    playTacticalBlip(1600);
+    if (viewMode === '3d') {
+      setGlobeRotation([-userLocation.lng, userLocation.lat]);
+    } else {
+      const [ux, uy] = project2D(userLocation.lng, userLocation.lat);
+      setPanOffset([500 - ux * zoomLevel, 250 - uy * zoomLevel]);
     }
   };
 
-  const handleMouseUp = () => {
-    setIsDragging(false);
-    dragStartRef.current = null;
+  // Zoom helpers
+  const handleZoomIn = () => {
+    playTacticalBlip(1200);
+    setZoomLevel((z) => Math.min(4.5, z + 0.35));
+  };
+  const handleZoomOut = () => {
+    playTacticalBlip(1000);
+    setZoomLevel((z) => Math.max(1, z - 0.35));
+  };
+  const handleResetZoom = () => {
+    playTacticalBlip(1100);
+    setZoomLevel(1);
+    setPanOffset([0, 0]);
   };
 
-  // Jump camera directly to given coordinates
-  const jumpToCoords = (lng: number, lat: number) => {
-    setRotLng(lng);
-    setRotLat(lat);
-    setAutoRotate(false);
+  // Drag handlers for 2D Pan and 3D Rotation
+  const handleMouseDown = (e: React.MouseEvent) => {
+    setIsDragging(true);
+    setDragStart([e.clientX, e.clientY]);
   };
 
-  const globeRadius = 175 * zoomLevel;
-  const globeCenter = { cx: 400, cy: 200 };
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!isDragging) return;
+    const dx = e.clientX - dragStart[0];
+    const dy = e.clientY - dragStart[1];
+    setDragStart([e.clientX, e.clientY]);
 
-  // Calculate 3D projected continents
-  const projectedContinents = useMemo(() => {
-    if (projectionMode !== '3d') return [];
-    return CONTINENTS.map((cont) => {
-      const projectedPoints = cont.points.map(([lng, lat]) =>
-        project3D(lng, lat, rotLng, rotLat, globeRadius, globeCenter.cx, globeCenter.cy)
-      );
-      // Construct SVG path string
-      const visiblePoints = projectedPoints.filter((p) => p.visible);
-      if (visiblePoints.length < 2) return null;
+    if (viewMode === '2d') {
+      setPanOffset(([px, py]) => [px + dx, py + dy]);
+    } else {
+      setGlobeRotation(([lng, lat]) => [
+        (lng - dx * 0.4) % 360,
+        Math.max(-75, Math.min(75, lat + dy * 0.4)),
+      ]);
+    }
+  };
 
-      const pathData = projectedPoints
-        .map((p, idx) => `${idx === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`)
-        .join(' ') + ' Z';
+  const handleMouseUp = () => setIsDragging(false);
 
-      return { name: cont.name, path: pathData };
-    }).filter(Boolean);
-  }, [projectionMode, rotLng, rotLat, globeRadius, globeCenter.cx, globeCenter.cy]);
+  // Jump camera to coordinates
+  const handleJumpToCoord = (lat: number, lng: number) => {
+    playTacticalBlip(1500);
+    if (viewMode === '3d') {
+      setGlobeRotation([-lng, lat]);
+    } else {
+      const [targetX, targetY] = project2D(lng, lat);
+      setZoomLevel(2.0);
+      setPanOffset([500 - targetX * 2.0, 250 - targetY * 2.0]);
+    }
+  };
+
+  const toggleLayer = (layerKey: keyof typeof layers) => {
+    playTacticalBlip(1300);
+    setLayers((prev) => ({ ...prev, [layerKey]: !prev[layerKey] }));
+  };
+
+  // Compute Solar Subsolar Point for Twilight Terminator (~0° Lat approx, UTC hour)
+  const sunLng = useMemo(() => {
+    const now = new Date();
+    const utcHours = now.getUTCHours() + now.getUTCMinutes() / 60;
+    // Subsolar point moves 360 degrees in 24 hours: 12 UTC = 0° lng, 0 UTC = 180° lng
+    return ((12 - utcHours) * 15 + 360) % 360 - 180;
+  }, []);
+
+  const [sunX] = project2D(sunLng, 0);
 
   return (
-    <div id="world-map-projection-container" className="relative w-full bg-[#030303] border border-[#1a1a1a] rounded-lg overflow-hidden p-3 select-none flex flex-col gap-2">
-      {/* TOP CONTROLS & HUD HEADER */}
-      <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-[#1a1a1a] text-xs">
-        <div className="flex items-center gap-2">
-          <span className="inline-block w-2.5 h-2.5 rounded-full bg-[#00ff41] animate-pulse"></span>
-          <span className="font-mono uppercase tracking-widest text-[#00ff41] font-semibold text-xs">
-            REAL-TIME MULTI-DOMAIN GLOBE & RADAR
-          </span>
-          <span className="px-1.5 py-0.2 rounded text-[10px] font-mono bg-[#111111] text-[#888888] border border-[#222222]">
-            {projectionMode === '3d' ? '3D ORTHOGRAPHIC SPHERE' : '2D TACTICAL EQUIRECTANGULAR'}
-          </span>
+    <div
+      ref={containerRef}
+      id="top-global-radar-map"
+      className={`w-full bg-[#03060d] border border-[#162338] rounded-xl overflow-hidden shadow-2xl flex flex-col font-sans transition-all relative ${
+        isFullscreen ? 'fixed inset-2 z-50 h-[96vh]' : 'w-full'
+      }`}
+    >
+      {/* Top Map Control Bar */}
+      <div className="px-3 py-2.5 bg-[#070d18] border-b border-[#162338] flex flex-wrap items-center justify-between gap-2.5 text-xs font-mono select-none">
+        {/* Left: Map Title & Status */}
+        <div className="flex items-center gap-2.5">
+          <div className="p-1.5 rounded-lg bg-[#00ff41]/20 border border-[#00ff41]/40 text-[#00ff41] shadow-sm shadow-[#00ff41]/20">
+            <GlobeIcon className="w-4 h-4" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-xs md:text-sm font-bold text-white uppercase tracking-wider">
+                PHOTOREALISTIC GLOBAL SURVEILLANCE RADAR
+              </h2>
+              <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-[#0e2744] text-[#00d1ff] border border-[#00d1ff]/50">
+                FULL-SPAN LIVE GIS
+              </span>
+            </div>
+            <div className="text-[10px] text-[#6b859e] hidden sm:block">
+              Photorealistic Biome Elevation • Bathymetry Shelf • ADS-B Aircraft • AIS Tankers • USGS Seismology • NASA FIRMS
+            </div>
+          </div>
         </div>
 
-        {/* View Switcher & Quick Jump Dropdown */}
-        <div className="flex flex-wrap items-center gap-2 font-mono">
-          {/* Quick Target Navigation */}
-          <select
-            id="quick-jump-target"
-            className="px-2 py-1 rounded bg-[#0a0a0a] border border-[#222222] text-[#00d1ff] text-[11px] focus:outline-none cursor-pointer"
-            onChange={(e) => {
-              const val = e.target.value;
-              if (val === 'hormuz') jumpToCoords(56.25, 26.56);
-              else if (val === 'babelmandeb') jumpToCoords(43.33, 12.58);
-              else if (val === 'malacca') jumpToCoords(101.5, 2.5);
-              else if (val === 'suwalki') jumpToCoords(20.5, 55.0);
-              else if (val === 'pacific_titan') jumpToCoords(57.14, 25.82);
-              else if (val === 'rivet_joint') jumpToCoords(31.42, 43.85);
-              else if (val === 'taiwan') jumpToCoords(121.65, 23.85);
-              else if (val === 'greece') jumpToCoords(22.35, 37.5);
-            }}
-            defaultValue=""
+        {/* Right: View Mode & Zoom Controls */}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Center on user button */}
+          <button
+            type="button"
+            onClick={handleCenterOnUser}
+            className="px-2.5 py-1 rounded bg-[#00ff41]/20 hover:bg-[#00ff41]/30 border border-[#00ff41]/60 text-[#00ff41] font-bold flex items-center gap-1.5 text-xs transition-all shadow-sm"
+            title={`Center map on ${userLocation.name}`}
           >
-            <option value="" disabled>🎯 Jump Target...</option>
-            <option value="hormuz">Strait of Hormuz (26.56°N, 56.25°E)</option>
-            <option value="babelmandeb">Bab-el-Mandeb Strait (12.58°N, 43.33°E)</option>
-            <option value="malacca">Strait of Malacca (2.50°N, 101.5°E)</option>
-            <option value="suwalki">Suwalki GPS Jamming (55.00°N, 20.50°E)</option>
-            <option value="pacific_titan">PACIFIC TITAN Tanker</option>
-            <option value="rivet_joint">RC-135W Rivet Joint Recon</option>
-            <option value="taiwan">Taiwan M6.8 Quake Epicenter</option>
-            <option value="greece">Peloponnese Wildfire (Greece)</option>
-          </select>
+            <Compass className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">🎯 Center on Me</span>
+            <span className="sm:hidden">Me</span>
+          </button>
 
-          {/* Projection Mode Switcher */}
-          <div className="flex rounded bg-[#0a0a0a] p-0.5 border border-[#222222]">
+          {/* 2D Satellite vs 3D Globe Toggle */}
+          <div className="flex rounded bg-[#040811] p-0.5 border border-[#162338]">
             <button
               type="button"
-              id="mode-3d-globe"
-              onClick={() => setProjectionMode('3d')}
-              className={`px-2.5 py-0.5 rounded text-[11px] transition-colors flex items-center gap-1 ${
-                projectionMode === '3d'
-                  ? 'bg-[#1f1f1f] text-[#00ff41] font-bold border border-[#333333]'
+              onClick={() => {
+                setViewMode('2d');
+                playTacticalBlip(1200);
+              }}
+              className={`px-2.5 py-1 rounded text-[11px] font-bold transition-colors ${
+                viewMode === '2d'
+                  ? 'bg-[#102a45] text-[#00ff41] border border-[#1d4b7a]'
                   : 'text-[#888888] hover:text-white'
               }`}
             >
-              <GlobeIcon className="w-3 h-3" /> 3D Globe
+              2D Photorealistic
             </button>
             <button
               type="button"
-              id="mode-2d-map"
-              onClick={() => setProjectionMode('2d')}
-              className={`px-2.5 py-0.5 rounded text-[11px] transition-colors flex items-center gap-1 ${
-                projectionMode === '2d'
-                  ? 'bg-[#1f1f1f] text-[#00d1ff] font-bold border border-[#333333]'
+              onClick={() => {
+                setViewMode('3d');
+                playTacticalBlip(1200);
+              }}
+              className={`px-2.5 py-1 rounded text-[11px] font-bold transition-colors ${
+                viewMode === '3d'
+                  ? 'bg-[#102a45] text-[#00ff41] border border-[#1d4b7a]'
                   : 'text-[#888888] hover:text-white'
               }`}
             >
-              <Compass className="w-3 h-3" /> 2D Map
+              3D Globe
             </button>
           </div>
 
-          {/* 3D controls */}
-          {projectionMode === '3d' && (
+          {/* 3D Auto Rotate */}
+          {viewMode === '3d' && (
             <button
               type="button"
-              id="toggle-auto-rotate"
               onClick={() => setAutoRotate(!autoRotate)}
-              className={`px-2 py-0.5 rounded text-[11px] border transition-colors flex items-center gap-1 ${
+              className={`px-2 py-1 rounded text-[11px] font-mono border transition-colors ${
                 autoRotate
-                  ? 'bg-[#111111] text-[#00ff41] border-[#00ff41]/40'
-                  : 'bg-[#0a0a0a] text-[#666666] border-[#222222]'
+                  ? 'bg-[#00d1ff]/20 text-[#00d1ff] border-[#00d1ff]/60'
+                  : 'bg-[#040811] text-[#888888] border-[#162338]'
               }`}
-              title="Toggle Auto Rotation"
             >
-              <RefreshCw className={`w-3 h-3 ${autoRotate ? 'animate-spin' : ''}`} />
-              <span className="hidden sm:inline">{autoRotate ? 'ROTATING' : 'PAUSED'}</span>
+              {autoRotate ? 'Orbit: ON' : 'Orbit: OFF'}
             </button>
           )}
 
-          {/* Zoom Buttons */}
-          <div className="flex items-center gap-1">
+          {/* Zoom controls */}
+          <div className="flex items-center gap-1 bg-[#040811] p-0.5 rounded border border-[#162338]">
             <button
               type="button"
-              onClick={() => setZoomLevel((z) => Math.max(0.7, z - 0.15))}
-              className="px-2 py-0.5 rounded bg-[#0a0a0a] border border-[#222222] text-[#aaaaaa] hover:text-white text-xs"
+              onClick={handleZoomIn}
+              className="px-2 py-0.5 rounded text-[#888888] hover:text-white hover:bg-[#162338]"
+              title="Zoom In"
+            >
+              +
+            </button>
+            <span className="px-1 text-[10px] text-[#00d1ff] font-bold">
+              {zoomLevel.toFixed(1)}x
+            </span>
+            <button
+              type="button"
+              onClick={handleZoomOut}
+              className="px-2 py-0.5 rounded text-[#888888] hover:text-white hover:bg-[#162338]"
               title="Zoom Out"
             >
               -
             </button>
             <button
               type="button"
-              onClick={() => setZoomLevel(1)}
-              className="px-1.5 py-0.5 rounded bg-[#0a0a0a] border border-[#222222] text-[#888888] hover:text-white text-[10px]"
+              onClick={handleResetZoom}
+              className="px-1.5 py-0.5 rounded text-[10px] text-[#888888] hover:text-white hover:bg-[#162338]"
               title="Reset Zoom"
             >
-              1x
-            </button>
-            <button
-              type="button"
-              onClick={() => setZoomLevel((z) => Math.min(1.8, z + 0.15))}
-              className="px-2 py-0.5 rounded bg-[#0a0a0a] border border-[#222222] text-[#aaaaaa] hover:text-white text-xs"
-              title="Zoom In"
-            >
-              +
+              Reset
             </button>
           </div>
+
+          {/* Fullscreen toggle */}
+          <button
+            type="button"
+            onClick={() => setIsFullscreen(!isFullscreen)}
+            className="p-1.5 rounded bg-[#040811] hover:bg-[#162338] border border-[#162338] text-[#888888] hover:text-white"
+            title={isFullscreen ? 'Exit Fullscreen' : 'Expand Fullscreen'}
+          >
+            {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+          </button>
         </div>
       </div>
 
-      {/* LAYER FILTER BUTTONS */}
-      <div className="flex flex-wrap items-center gap-1.5 font-mono text-[11px]">
+      {/* Layer Filters Strip */}
+      <div className="px-3 py-1.5 bg-[#050b14] border-b border-[#162338] flex flex-wrap items-center gap-1.5 text-[11px] font-mono select-none overflow-x-auto">
+        <span className="text-[#55718a] uppercase text-[10px] tracking-wider mr-1 flex items-center gap-1">
+          <Layers className="w-3 h-3 text-[#00d1ff]" />
+          GIS Layers:
+        </span>
+
+        {/* User Focal Point */}
         <button
           type="button"
-          onClick={() => setShowVessels(!showVessels)}
-          className={`px-2 py-0.5 rounded transition-colors border flex items-center gap-1 ${
-            showVessels
-              ? 'bg-[#0e1620] border-cyan-500/70 text-cyan-300'
-              : 'bg-[#080808] border-[#1f1f1f] text-[#555555]'
+          onClick={() => toggleLayer('userFocal')}
+          className={`px-2 py-0.5 rounded border transition-colors flex items-center gap-1 ${
+            layers.userFocal
+              ? 'bg-[#00ff41]/20 text-[#00ff41] border-[#00ff41]/60 font-bold'
+              : 'bg-[#070d18] text-[#4d667c] border-[#162338]'
           }`}
         >
-          <Ship className="w-3 h-3" /> Vessels ({trackedVessels.length})
+          <Compass className="w-3 h-3" />
+          You ({userLocation?.name?.slice(0, 10) || 'Home'})
         </button>
 
+        {/* Storms */}
         <button
           type="button"
-          onClick={() => setShowFlights(!showFlights)}
-          className={`px-2 py-0.5 rounded transition-colors border flex items-center gap-1 ${
-            showFlights
-              ? 'bg-[#181404] border-yellow-500/70 text-yellow-300'
-              : 'bg-[#080808] border-[#1f1f1f] text-[#555555]'
+          onClick={() => toggleLayer('storms')}
+          className={`px-2 py-0.5 rounded border transition-colors flex items-center gap-1 ${
+            layers.storms
+              ? 'bg-cyan-950/80 text-cyan-300 border-cyan-600 font-bold'
+              : 'bg-[#070d18] text-[#4d667c] border-[#162338]'
           }`}
         >
-          <Plane className="w-3 h-3" /> Flights ({emergencySquawks.length})
+          <Wind className="w-3 h-3" />
+          Storms ({ACTIVE_GLOBAL_STORMS.length})
         </button>
 
+        {/* Wind Streamlines */}
         <button
           type="button"
-          onClick={() => setShowChokepoints(!showChokepoints)}
-          className={`px-2 py-0.5 rounded transition-colors border flex items-center gap-1 ${
-            showChokepoints
-              ? 'bg-[#180e0e] border-rose-600/70 text-rose-300'
-              : 'bg-[#080808] border-[#1f1f1f] text-[#555555]'
+          onClick={() => toggleLayer('windFlow')}
+          className={`px-2 py-0.5 rounded border transition-colors flex items-center gap-1 ${
+            layers.windFlow
+              ? 'bg-teal-950/80 text-teal-300 border-teal-600 font-bold'
+              : 'bg-[#070d18] text-[#4d667c] border-[#162338]'
           }`}
         >
-          <Anchor className="w-3 h-3" /> Chokepoints ({chokepoints.length})
+          <span>💨</span>
+          Wind Streams
         </button>
 
+        {/* Twitter Disaster OSINT */}
         <button
           type="button"
-          onClick={() => setShowGpsJamming(!showGpsJamming)}
-          className={`px-2 py-0.5 rounded transition-colors border flex items-center gap-1 ${
-            showGpsJamming
-              ? 'bg-[#1a0f1e] border-purple-500/70 text-purple-300'
-              : 'bg-[#080808] border-[#1f1f1f] text-[#555555]'
+          onClick={() => toggleLayer('disasters')}
+          className={`px-2 py-0.5 rounded border transition-colors flex items-center gap-1 ${
+            layers.disasters
+              ? 'bg-rose-950/80 text-rose-300 border-rose-600 font-bold animate-pulse'
+              : 'bg-[#070d18] text-[#4d667c] border-[#162338]'
           }`}
         >
-          <Radio className="w-3 h-3" /> GPS Jamming ({gpsJammingZones.length})
+          <Sparkles className="w-3 h-3" />
+          Disasters ({disasterTweets.length})
         </button>
 
+        {/* Earthquakes */}
         <button
           type="button"
-          onClick={() => setShowQuakes(!showQuakes)}
-          className={`px-2 py-0.5 rounded transition-colors border flex items-center gap-1 ${
-            showQuakes
-              ? 'bg-[#1a0a0c] border-red-500/70 text-red-300'
-              : 'bg-[#080808] border-[#1f1f1f] text-[#555555]'
+          onClick={() => toggleLayer('earthquakes')}
+          className={`px-2 py-0.5 rounded border transition-colors flex items-center gap-1 ${
+            layers.earthquakes
+              ? 'bg-amber-950/80 text-amber-300 border-amber-600 font-bold'
+              : 'bg-[#070d18] text-[#4d667c] border-[#162338]'
           }`}
         >
-          <Zap className="w-3 h-3" /> Quakes ({earthquakes.length})
+          <Activity className="w-3 h-3" />
+          Quakes ({earthquakes.length})
         </button>
 
+        {/* Flights ADS-B */}
         <button
           type="button"
-          onClick={() => setShowFires(!showFires)}
-          className={`px-2 py-0.5 rounded transition-colors border flex items-center gap-1 ${
-            showFires
-              ? 'bg-[#1a1005] border-orange-500/70 text-orange-300'
-              : 'bg-[#080808] border-[#1f1f1f] text-[#555555]'
+          onClick={() => toggleLayer('flights')}
+          className={`px-2 py-0.5 rounded border transition-colors flex items-center gap-1 ${
+            layers.flights
+              ? 'bg-sky-950/80 text-sky-300 border-sky-600 font-bold'
+              : 'bg-[#070d18] text-[#4d667c] border-[#162338]'
           }`}
         >
-          <Flame className="w-3 h-3" /> Wildfires ({fireAnomalies.length})
+          <Plane className="w-3 h-3" />
+          ADS-B Flights ({emergencySquawks.length})
         </button>
 
+        {/* Maritime Vessels */}
         <button
           type="button"
-          onClick={() => setShowDisasters(!showDisasters)}
-          className={`px-2 py-0.5 rounded transition-colors border flex items-center gap-1 ${
-            showDisasters
-              ? 'bg-[#05161c] border-sky-400/80 text-sky-300 font-bold'
-              : 'bg-[#080808] border-[#1f1f1f] text-[#555555]'
+          onClick={() => toggleLayer('vessels')}
+          className={`px-2 py-0.5 rounded border transition-colors flex items-center gap-1 ${
+            layers.vessels
+              ? 'bg-indigo-950/80 text-indigo-300 border-indigo-600 font-bold'
+              : 'bg-[#070d18] text-[#4d667c] border-[#162338]'
           }`}
         >
-          <Sparkles className="w-3 h-3" /> X/Twitter OSINT ({disasterTweets.length})
+          <Ship className="w-3 h-3" />
+          AIS Maritime ({trackedVessels.length})
         </button>
 
+        {/* Wildfires FIRMS */}
         <button
           type="button"
-          onClick={() => setShowWeather(!showWeather)}
-          className={`px-2 py-0.5 rounded transition-colors border flex items-center gap-1 ${
-            showWeather
-              ? 'bg-[#061510] border-emerald-500/70 text-emerald-300'
-              : 'bg-[#080808] border-[#1f1f1f] text-[#555555]'
+          onClick={() => toggleLayer('wildfires')}
+          className={`px-2 py-0.5 rounded border transition-colors flex items-center gap-1 ${
+            layers.wildfires
+              ? 'bg-orange-950/80 text-orange-300 border-orange-600 font-bold'
+              : 'bg-[#070d18] text-[#4d667c] border-[#162338]'
           }`}
         >
-          <Wind className="w-3 h-3" /> AQI Hubs ({weatherHubs.length})
+          <Flame className="w-3 h-3" />
+          Wildfires ({fireAnomalies.length})
+        </button>
+
+        {/* Kinetic Strikes */}
+        <button
+          type="button"
+          onClick={() => toggleLayer('strikes')}
+          className={`px-2 py-0.5 rounded border transition-colors flex items-center gap-1 ${
+            layers.strikes
+              ? 'bg-red-950/80 text-red-300 border-red-600 font-bold'
+              : 'bg-[#070d18] text-[#4d667c] border-[#162338]'
+          }`}
+        >
+          <AlertOctagon className="w-3 h-3" />
+          Strikes ({ACTIVE_KINETIC_STRIKES.length})
+        </button>
+
+        {/* GPS Jamming */}
+        <button
+          type="button"
+          onClick={() => toggleLayer('gpsJamming')}
+          className={`px-2 py-0.5 rounded border transition-colors flex items-center gap-1 ${
+            layers.gpsJamming
+              ? 'bg-purple-950/80 text-purple-300 border-purple-600 font-bold'
+              : 'bg-[#070d18] text-[#4d667c] border-[#162338]'
+          }`}
+        >
+          <Radio className="w-3 h-3" />
+          GPS Jamming ({gpsJammingZones.length})
+        </button>
+
+        {/* City Night Lights */}
+        <button
+          type="button"
+          onClick={() => toggleLayer('cityLights')}
+          className={`px-2 py-0.5 rounded border transition-colors flex items-center gap-1 ${
+            layers.cityLights
+              ? 'bg-amber-950/60 text-amber-200 border-amber-500/70'
+              : 'bg-[#070d18] text-[#4d667c] border-[#162338]'
+          }`}
+        >
+          <Sun className="w-3 h-3" />
+          City Lights
         </button>
       </div>
 
-      {/* CANVAS / SVG INTERACTIVE MAP & GLOBE DISPLAY */}
+      {/* Primary Interactive Full-Width GIS Canvas */}
       <div
-        className="relative w-full aspect-[2/1] min-h-[360px] max-h-[560px] overflow-hidden bg-[#020202] rounded border border-[#1a1a1a] cursor-grab active:cursor-grabbing"
+        className="relative w-full h-[460px] md:h-[540px] lg:h-[580px] bg-[#02050b] cursor-crosshair overflow-hidden select-none"
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
       >
-        {/* Background Space Grid & Radial Atmosphere Glow */}
-        <div className="absolute inset-0 bg-[radial-gradient(#151515_1px,transparent_1px)] [background-size:24px_24px] pointer-events-none opacity-40"></div>
-
-        {projectionMode === '3d' && (
-          <div
-            className="absolute pointer-events-none rounded-full"
+        {/* ========================================================================= */}
+        {/* 2D PHOTOREALISTIC SATELLITE VECTOR PROJECTION (1000 x 500 space)         */}
+        {/* ========================================================================= */}
+        {viewMode === '2d' && (
+          <svg
+            viewBox="0 0 1000 500"
+            className="w-full h-full block pointer-events-auto"
             style={{
-              width: `${globeRadius * 2.15}px`,
-              height: `${globeRadius * 2.15}px`,
-              left: `${globeCenter.cx - globeRadius * 1.075}px`,
-              top: `${globeCenter.cy - globeRadius * 1.075}px`,
-              background: 'radial-gradient(circle, rgba(0,209,255,0.06) 0%, rgba(0,255,65,0.02) 65%, transparent 75%)',
-            }}
-          />
-        )}
-
-        <svg
-          viewBox="0 0 800 400"
-          className="w-full h-full"
-          onClick={() => setSelectedEntity(null)}
-        >
-          {/* ========================================================================= */}
-          {/* 3D GLOBE RENDERING PIPELINE */}
-          {/* ========================================================================= */}
-          {projectionMode === '3d' && (
-            <g id="globe-3d-group">
-              {/* Globe Base Sphere & Shadow */}
-              <defs>
-                <radialGradient id="globeSphereGradient" cx="35%" cy="35%" r="65%">
-                  <stop offset="0%" stopColor="#101820" />
-                  <stop offset="60%" stopColor="#080c10" />
-                  <stop offset="100%" stopColor="#020406" />
-                </radialGradient>
-                <radialGradient id="atmosphereRim" cx="50%" cy="50%" r="50%">
-                  <stop offset="85%" stopColor="transparent" />
-                  <stop offset="96%" stopColor="rgba(0, 209, 255, 0.25)" />
-                  <stop offset="100%" stopColor="rgba(0, 255, 65, 0.4)" />
-                </radialGradient>
-              </defs>
-
-              {/* Globe Sphere Disc */}
-              <circle
-                cx={globeCenter.cx}
-                cy={globeCenter.cy}
-                r={globeRadius}
-                fill="url(#globeSphereGradient)"
-                stroke="#1f2937"
-                strokeWidth="1.5"
-              />
-
-              {/* Atmosphere rim overlay */}
-              <circle
-                cx={globeCenter.cx}
-                cy={globeCenter.cy}
-                r={globeRadius}
-                fill="url(#atmosphereRim)"
-                pointerEvents="none"
-              />
-
-              {/* 3D Latitude Parallels */}
-              {[-60, -30, 0, 30, 60].map((lat) => {
-                const points: string[] = [];
-                for (let lng = 0; lng <= 360; lng += 8) {
-                  const p = project3D(lng, lat, rotLng, rotLat, globeRadius, globeCenter.cx, globeCenter.cy);
-                  if (p.visible) {
-                    points.push(`${points.length === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`);
-                  }
-                }
-                if (points.length < 2) return null;
-                return (
-                  <path
-                    key={`lat-${lat}`}
-                    d={points.join(' ')}
-                    fill="none"
-                    stroke={lat === 0 ? 'rgba(0, 255, 65, 0.25)' : 'rgba(255, 255, 255, 0.05)'}
-                    strokeWidth={lat === 0 ? '1' : '0.5'}
-                    strokeDasharray={lat === 0 ? 'none' : '3 3'}
-                  />
-                );
-              })}
-
-              {/* 3D Longitude Meridians */}
-              {[0, 45, 90, 135, 180, 225, 270, 315].map((lng) => {
-                const points: string[] = [];
-                for (let lat = -80; lat <= 80; lat += 5) {
-                  const p = project3D(lng, lat, rotLng, rotLat, globeRadius, globeCenter.cx, globeCenter.cy);
-                  if (p.visible) {
-                    points.push(`${points.length === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`);
-                  }
-                }
-                if (points.length < 2) return null;
-                return (
-                  <path
-                    key={`meridian-${lng}`}
-                    d={points.join(' ')}
-                    fill="none"
-                    stroke={lng === 0 ? 'rgba(0, 209, 255, 0.3)' : 'rgba(255, 255, 255, 0.05)'}
-                    strokeWidth={lng === 0 ? '1' : '0.5'}
-                  />
-                );
-              })}
-
-              {/* 3D Continent Vector Silhouettes */}
-              {projectedContinents.map((cont, idx) => (
-                <path
-                  key={`cont-3d-${idx}`}
-                  d={cont?.path}
-                  fill="#0d181e"
-                  stroke="#1c303d"
-                  strokeWidth="0.75"
-                />
-              ))}
-
-              {/* 3D LAYER: GPS JAMMING ZONES */}
-              {showGpsJamming &&
-                gpsJammingZones.map((zone) => {
-                  const p = project3D(zone.lng, zone.lat, rotLng, rotLat, globeRadius, globeCenter.cx, globeCenter.cy);
-                  if (!p.visible) return null;
-                  const rad = (zone.radiusKm / 15) * (globeRadius / 175);
-                  const isSelected = selectedEntity?.data?.id === zone.id;
-
-                  return (
-                    <g
-                      key={`jam-3d-${zone.id}`}
-                      className="cursor-pointer"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedEntity({ type: 'jamming', data: zone, screenCoords: [p.x, p.y] });
-                      }}
-                    >
-                      <circle
-                        cx={p.x}
-                        cy={p.y}
-                        r={rad}
-                        fill="rgba(168, 85, 247, 0.18)"
-                        stroke="#a855f7"
-                        strokeWidth={isSelected ? 2 : 1}
-                        strokeDasharray="4 2"
-                        className="animate-pulse"
-                      />
-                      <circle cx={p.x} cy={p.y} r={3} fill="#c084fc" />
-                    </g>
-                  );
-                })}
-
-              {/* 3D LAYER: CHOKEPOINTS */}
-              {showChokepoints &&
-                chokepoints.map((cp) => {
-                  const p = project3D(cp.lng, cp.lat, rotLng, rotLat, globeRadius, globeCenter.cx, globeCenter.cy);
-                  if (!p.visible) return null;
-                  const isSelected = selectedEntity?.data?.id === cp.id;
-                  const color = cp.status === 'High Risk' ? '#ef4444' : cp.status === 'Restricted' ? '#f97316' : cp.status === 'Congested' ? '#eab308' : '#00ff41';
-
-                  return (
-                    <g
-                      key={`cp-3d-${cp.id}`}
-                      className="cursor-pointer group"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedEntity({ type: 'chokepoint', data: cp, screenCoords: [p.x, p.y] });
-                      }}
-                    >
-                      <rect
-                        x={p.x - 4}
-                        y={p.y - 4}
-                        width="8"
-                        height="8"
-                        fill={color}
-                        stroke="#ffffff"
-                        strokeWidth={isSelected ? 1.5 : 0.5}
-                        transform={`rotate(45, ${p.x}, ${p.y})`}
-                      />
-                      <text
-                        x={p.x + 7}
-                        y={p.y + 3}
-                        fill="#d1d5db"
-                        fontSize="8"
-                        fontFamily="monospace"
-                        className="pointer-events-none group-hover:fill-white font-medium"
-                      >
-                        ⚓ {cp.name.split(' ')[0]}
-                      </text>
-                    </g>
-                  );
-                })}
-
-              {/* 3D LAYER: VESSELS */}
-              {showVessels &&
-                trackedVessels.map((v) => {
-                  const p = project3D(v.lng, v.lat, rotLng, rotLat, globeRadius, globeCenter.cx, globeCenter.cy);
-                  if (!p.visible) return null;
-                  const isDark = v.anomalyFlag && v.anomalyFlag !== 'Nominal';
-                  const color = isDark ? '#ef4444' : '#00d1ff';
-                  const isSelected = selectedEntity?.data?.mmsi === v.mmsi;
-
-                  return (
-                    <g
-                      key={`vessel-3d-${v.mmsi}`}
-                      className="cursor-pointer group"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedEntity({ type: 'vessel', data: v, screenCoords: [p.x, p.y] });
-                      }}
-                    >
-                      {/* Vessel direction arrow */}
-                      <polygon
-                        points={`${p.x},${p.y - 5} ${p.x + 3.5},${p.y + 4} ${p.x - 3.5},${p.y + 4}`}
-                        fill={color}
-                        stroke="#ffffff"
-                        strokeWidth={isSelected ? 1.5 : 0.5}
-                        transform={`rotate(${v.courseDegrees}, ${p.x}, ${p.y})`}
-                      />
-                      <text
-                        x={p.x + 6}
-                        y={p.y + 3}
-                        fill={isDark ? '#f87171' : '#9ca3af'}
-                        fontSize="7.5"
-                        fontFamily="monospace"
-                        className="pointer-events-none group-hover:fill-white font-semibold"
-                      >
-                        🚢 {v.vesselName}
-                      </text>
-                    </g>
-                  );
-                })}
-
-              {/* 3D LAYER: FLIGHTS */}
-              {showFlights &&
-                emergencySquawks.map((flight) => {
-                  const p = project3D(flight.lng || 0, flight.lat || 0, rotLng, rotLat, globeRadius, globeCenter.cx, globeCenter.cy);
-                  if (!p.visible) return null;
-                  const isEmergency = flight.squawk === '7700';
-                  const isRecon = flight.squawkType === 'SIGINT Reconnaissance';
-                  const color = isEmergency ? '#ef4444' : isRecon ? '#f59e0b' : '#38bdf8';
-                  const isSelected = selectedEntity?.data?.icao24 === flight.icao24;
-
-                  return (
-                    <g
-                      key={`flight-3d-${flight.icao24}`}
-                      className="cursor-pointer group"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedEntity({ type: 'flight', data: flight, screenCoords: [p.x, p.y] });
-                      }}
-                    >
-                      {isEmergency && (
-                        <circle
-                          cx={p.x}
-                          cy={p.y}
-                          r="12"
-                          fill="none"
-                          stroke="#ef4444"
-                          strokeWidth="1"
-                          className="animate-ping"
-                        />
-                      )}
-                      <polygon
-                        points={`${p.x},${p.y - 6} ${p.x + 4.5},${p.y + 4} ${p.x},${p.y + 2} ${p.x - 4.5},${p.y + 4}`}
-                        fill={color}
-                        stroke="#ffffff"
-                        strokeWidth={isSelected ? 1.5 : 0.5}
-                        transform={`rotate(${flight.heading || 0}, ${p.x}, ${p.y})`}
-                      />
-                      <text
-                        x={p.x + 7}
-                        y={p.y + 3}
-                        fill={color}
-                        fontSize="7.5"
-                        fontFamily="monospace"
-                        className="pointer-events-none group-hover:fill-white font-bold"
-                      >
-                        ✈ {flight.callsign} {isEmergency ? '[7700]' : ''}
-                      </text>
-                    </g>
-                  );
-                })}
-
-              {/* 3D LAYER: DISASTER TWEET BEACONS */}
-              {showDisasters &&
-                disasterTweets.map((tweet) => {
-                  const p = project3D(tweet.location.lng, tweet.location.lat, rotLng, rotLat, globeRadius, globeCenter.cx, globeCenter.cy);
-                  if (!p.visible) return null;
-                  const isSelected = selectedEntity?.data?.id === tweet.id;
-                  const isCritical = tweet.urgency === 'CRITICAL BREAKING';
-
-                  return (
-                    <g
-                      key={`tweet-3d-${tweet.id}`}
-                      className="cursor-pointer group"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedEntity({ type: 'disaster', data: tweet, screenCoords: [p.x, p.y] });
-                      }}
-                    >
-                      <circle
-                        cx={p.x}
-                        cy={p.y}
-                        r="10"
-                        fill="none"
-                        stroke={isCritical ? '#ef4444' : '#38bdf8'}
-                        strokeWidth="1.2"
-                        className="animate-ping"
-                      />
-                      <circle
-                        cx={p.x}
-                        cy={p.y}
-                        r={isSelected ? 6 : 4.5}
-                        fill={isCritical ? '#ef4444' : '#0284c7'}
-                        stroke="#ffffff"
-                        strokeWidth={isSelected ? 2 : 1}
-                      />
-                      <text
-                        x={p.x + 6}
-                        y={p.y + 3}
-                        fill="#38bdf8"
-                        fontSize="7.5"
-                        fontFamily="monospace"
-                        className="pointer-events-none group-hover:fill-white font-bold"
-                      >
-                        🐦 {tweet.handle}
-                      </text>
-                    </g>
-                  );
-                })}
-
-              {/* 3D LAYER: EARTHQUAKES */}
-              {showQuakes &&
-                earthquakes.map((eq) => {
-                  const p = project3D(eq.coordinates[0], eq.coordinates[1], rotLng, rotLat, globeRadius, globeCenter.cx, globeCenter.cy);
-                  if (!p.visible) return null;
-                  const isMajor = eq.mag >= 6.0;
-                  const isSignificant = eq.mag >= 4.5;
-                  const color = isMajor ? '#ef4444' : isSignificant ? '#f59e0b' : '#38bdf8';
-                  const radius = Math.max(3, (eq.mag - 2) * 2.5);
-                  const isSelected = selectedEntity?.data?.id === eq.id;
-
-                  return (
-                    <g
-                      key={`quake-3d-${eq.id}`}
-                      className="cursor-pointer"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedEntity({ type: 'quake', data: eq, screenCoords: [p.x, p.y] });
-                      }}
-                    >
-                      {isMajor && (
-                        <circle
-                          cx={p.x}
-                          cy={p.y}
-                          r={radius * 2}
-                          fill="none"
-                          stroke={color}
-                          strokeWidth="1"
-                          className="animate-ping"
-                        />
-                      )}
-                      <circle
-                        cx={p.x}
-                        cy={p.y}
-                        r={radius}
-                        fill={color}
-                        fillOpacity="0.85"
-                        stroke="#ffffff"
-                        strokeWidth={isSelected ? 2 : 0.75}
-                      />
-                    </g>
-                  );
-                })}
-
-              {/* 3D LAYER: THERMAL WILDFIRES */}
-              {showFires &&
-                fireAnomalies.map((fire) => {
-                  const p = project3D(fire.lng, fire.lat, rotLng, rotLat, globeRadius, globeCenter.cx, globeCenter.cy);
-                  if (!p.visible) return null;
-                  const isSelected = selectedEntity?.data?.id === fire.id;
-
-                  return (
-                    <g
-                      key={`fire-3d-${fire.id}`}
-                      className="cursor-pointer"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedEntity({ type: 'fire', data: fire, screenCoords: [p.x, p.y] });
-                      }}
-                    >
-                      <polygon
-                        points={`${p.x},${p.y - 5} ${p.x + 4},${p.y + 3} ${p.x - 4},${p.y + 3}`}
-                        fill="#f97316"
-                        stroke="#fbbf24"
-                        strokeWidth={isSelected ? 1.5 : 0.5}
-                      />
-                    </g>
-                  );
-                })}
-
-              {/* 3D LAYER: WEATHER HUBS */}
-              {showWeather &&
-                weatherHubs.map((hub) => {
-                  const p = project3D(hub.lng, hub.lat, rotLng, rotLat, globeRadius, globeCenter.cx, globeCenter.cy);
-                  if (!p.visible) return null;
-                  const color = hub.aqiUs > 150 ? '#ef4444' : hub.aqiUs > 100 ? '#f59e0b' : '#00ff41';
-                  const isSelected = selectedEntity?.data?.city === hub.city;
-
-                  return (
-                    <g
-                      key={`hub-3d-${hub.city}`}
-                      className="cursor-pointer group"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedEntity({ type: 'weather', data: hub, screenCoords: [p.x, p.y] });
-                      }}
-                    >
-                      <circle
-                        cx={p.x}
-                        cy={p.y}
-                        r={isSelected ? 5 : 3.5}
-                        fill={color}
-                        stroke="#ffffff"
-                        strokeWidth={isSelected ? 1.5 : 0.5}
-                      />
-                      <text
-                        x={p.x + 5}
-                        y={p.y + 3}
-                        fill="#9ca3af"
-                        fontSize="7"
-                        fontFamily="monospace"
-                        className="pointer-events-none group-hover:fill-white"
-                      >
-                        {hub.city}
-                      </text>
-                    </g>
-                  );
-                })}
-            </g>
-          )}
-
-          {/* ========================================================================= */}
-          {/* 2D TACTICAL EQUIRECTANGULAR PROJECTION PIPELINE */}
-          {/* ========================================================================= */}
-          {projectionMode === '2d' && (
-            <g id="map-2d-group">
-              {/* 2D Graticule Grid Lines */}
-              <g stroke="rgba(255, 255, 255, 0.05)" strokeWidth="0.75" strokeDasharray="3 3">
-                <line x1="100" y1="0" x2="100" y2="400" />
-                <line x1="200" y1="0" x2="200" y2="400" />
-                <line x1="300" y1="0" x2="300" y2="400" />
-                <line x1="400" y1="0" x2="400" y2="400" stroke="rgba(255, 255, 255, 0.15)" strokeDasharray="none" />
-                <line x1="500" y1="0" x2="500" y2="400" />
-                <line x1="600" y1="0" x2="600" y2="400" />
-                <line x1="700" y1="0" x2="700" y2="400" />
-                <line x1="0" y1="100" x2="800" y2="100" />
-                <line x1="0" y1="200" x2="800" y2="200" stroke="rgba(255, 255, 255, 0.15)" strokeDasharray="none" />
-                <line x1="0" y1="300" x2="800" y2="300" />
-              </g>
-
-              {/* 2D Continental Silhouettes */}
-              <g fill="#0e1419" stroke="#1f2937" strokeWidth="0.75">
-                <path d="M 120 70 L 160 65 L 210 75 L 250 85 L 235 120 L 215 140 L 205 175 L 180 185 L 165 170 L 140 145 L 115 120 Z" />
-                <path d="M 280 40 L 330 35 L 340 70 L 300 80 Z" />
-                <path d="M 230 195 L 265 210 L 290 245 L 280 300 L 250 345 L 235 320 L 225 250 L 220 210 Z" />
-                <path d="M 390 85 L 430 75 L 470 95 L 460 130 L 420 135 L 390 120 Z" />
-                <path d="M 390 140 L 450 140 L 485 180 L 470 260 L 440 300 L 410 270 L 380 200 L 380 160 Z" />
-                <path d="M 470 70 L 590 60 L 680 80 L 720 120 L 670 160 L 620 170 L 560 170 L 520 140 L 470 100 Z" />
-                <path d="M 640 260 L 710 260 L 720 310 L 670 330 L 640 300 Z" />
-                <path d="M 700 130 L 710 145 L 705 160 L 695 145 Z" />
-              </g>
-
-              {/* 2D GPS Jamming Zones */}
-              {showGpsJamming &&
-                gpsJammingZones.map((zone) => {
-                  const [cx, cy] = project2D(zone.lng, zone.lat);
-                  const isSelected = selectedEntity?.data?.id === zone.id;
-                  return (
-                    <g
-                      key={`jam-2d-${zone.id}`}
-                      className="cursor-pointer"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedEntity({ type: 'jamming', data: zone, screenCoords: [cx, cy] });
-                      }}
-                    >
-                      <circle
-                        cx={cx}
-                        cy={cy}
-                        r={zone.radiusKm / 12}
-                        fill="rgba(168, 85, 247, 0.15)"
-                        stroke="#a855f7"
-                        strokeWidth={isSelected ? 2 : 1}
-                        strokeDasharray="4 2"
-                      />
-                      <circle cx={cx} cy={cy} r={3} fill="#c084fc" />
-                    </g>
-                  );
-                })}
-
-              {/* 2D Chokepoints */}
-              {showChokepoints &&
-                chokepoints.map((cp) => {
-                  const [cx, cy] = project2D(cp.lng, cp.lat);
-                  const isSelected = selectedEntity?.data?.id === cp.id;
-                  const color = cp.status === 'High Risk' ? '#ef4444' : cp.status === 'Restricted' ? '#f97316' : cp.status === 'Congested' ? '#eab308' : '#00ff41';
-
-                  return (
-                    <g
-                      key={`cp-2d-${cp.id}`}
-                      className="cursor-pointer group"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedEntity({ type: 'chokepoint', data: cp, screenCoords: [cx, cy] });
-                      }}
-                    >
-                      <rect
-                        x={cx - 4}
-                        y={cy - 4}
-                        width="8"
-                        height="8"
-                        fill={color}
-                        stroke="#ffffff"
-                        strokeWidth={isSelected ? 1.5 : 0.5}
-                        transform={`rotate(45, ${cx}, ${cy})`}
-                      />
-                      <text
-                        x={cx + 6}
-                        y={cy + 3}
-                        fill="#d1d5db"
-                        fontSize="8"
-                        fontFamily="monospace"
-                        className="pointer-events-none group-hover:fill-white font-semibold"
-                      >
-                        ⚓ {cp.name}
-                      </text>
-                    </g>
-                  );
-                })}
-
-              {/* 2D Vessels */}
-              {showVessels &&
-                trackedVessels.map((v) => {
-                  const [cx, cy] = project2D(v.lng, v.lat);
-                  const isDark = v.anomalyFlag && v.anomalyFlag !== 'Nominal';
-                  const color = isDark ? '#ef4444' : '#00d1ff';
-                  const isSelected = selectedEntity?.data?.mmsi === v.mmsi;
-
-                  return (
-                    <g
-                      key={`vessel-2d-${v.mmsi}`}
-                      className="cursor-pointer group"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedEntity({ type: 'vessel', data: v, screenCoords: [cx, cy] });
-                      }}
-                    >
-                      <polygon
-                        points={`${cx},${cy - 5} ${cx + 3.5},${cy + 4} ${cx - 3.5},${cy + 4}`}
-                        fill={color}
-                        stroke="#ffffff"
-                        strokeWidth={isSelected ? 1.5 : 0.5}
-                        transform={`rotate(${v.courseDegrees}, ${cx}, ${cy})`}
-                      />
-                      <text
-                        x={cx + 6}
-                        y={cy + 3}
-                        fill={isDark ? '#f87171' : '#9ca3af'}
-                        fontSize="7.5"
-                        fontFamily="monospace"
-                        className="pointer-events-none group-hover:fill-white font-medium"
-                      >
-                        🚢 {v.vesselName}
-                      </text>
-                    </g>
-                  );
-                })}
-
-              {/* 2D Flights */}
-              {showFlights &&
-                emergencySquawks.map((flight) => {
-                  const [cx, cy] = project2D(flight.lng || 0, flight.lat || 0);
-                  const isEmergency = flight.squawk === '7700';
-                  const isRecon = flight.squawkType === 'SIGINT Reconnaissance';
-                  const color = isEmergency ? '#ef4444' : isRecon ? '#f59e0b' : '#38bdf8';
-                  const isSelected = selectedEntity?.data?.icao24 === flight.icao24;
-
-                  return (
-                    <g
-                      key={`flight-2d-${flight.icao24}`}
-                      className="cursor-pointer group"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedEntity({ type: 'flight', data: flight, screenCoords: [cx, cy] });
-                      }}
-                    >
-                      {isEmergency && (
-                        <circle
-                          cx={cx}
-                          cy={cy}
-                          r="12"
-                          fill="none"
-                          stroke="#ef4444"
-                          strokeWidth="1"
-                          className="animate-ping"
-                        />
-                      )}
-                      <polygon
-                        points={`${cx},${cy - 6} ${cx + 4.5},${cy + 4} ${cx},${cy + 2} ${cx - 4.5},${cy + 4}`}
-                        fill={color}
-                        stroke="#ffffff"
-                        strokeWidth={isSelected ? 1.5 : 0.5}
-                        transform={`rotate(${flight.heading || 0}, ${cx}, ${cy})`}
-                      />
-                      <text
-                        x={cx + 7}
-                        y={cy + 3}
-                        fill={color}
-                        fontSize="7.5"
-                        fontFamily="monospace"
-                        className="pointer-events-none group-hover:fill-white font-bold"
-                      >
-                        ✈ {flight.callsign} {isEmergency ? '[7700]' : ''}
-                      </text>
-                    </g>
-                  );
-                })}
-
-              {/* 2D Disaster Tweets */}
-              {showDisasters &&
-                disasterTweets.map((tweet) => {
-                  const [cx, cy] = project2D(tweet.location.lng, tweet.location.lat);
-                  const isSelected = selectedEntity?.data?.id === tweet.id;
-                  const isCritical = tweet.urgency === 'CRITICAL BREAKING';
-
-                  return (
-                    <g
-                      key={`tweet-2d-${tweet.id}`}
-                      className="cursor-pointer group"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedEntity({ type: 'disaster', data: tweet, screenCoords: [cx, cy] });
-                      }}
-                    >
-                      <circle
-                        cx={cx}
-                        cy={cy}
-                        r="10"
-                        fill="none"
-                        stroke={isCritical ? '#ef4444' : '#38bdf8'}
-                        strokeWidth="1.2"
-                        className="animate-ping"
-                      />
-                      <circle
-                        cx={cx}
-                        cy={cy}
-                        r={isSelected ? 6 : 4.5}
-                        fill={isCritical ? '#ef4444' : '#0284c7'}
-                        stroke="#ffffff"
-                        strokeWidth={isSelected ? 2 : 1}
-                      />
-                      <text
-                        x={cx + 6}
-                        y={cy + 3}
-                        fill="#38bdf8"
-                        fontSize="7.5"
-                        fontFamily="monospace"
-                        className="pointer-events-none group-hover:fill-white font-bold"
-                      >
-                        🐦 {tweet.handle}
-                      </text>
-                    </g>
-                  );
-                })}
-
-              {/* 2D Earthquakes */}
-              {showQuakes &&
-                earthquakes.map((eq) => {
-                  const [cx, cy] = project2D(eq.coordinates[0], eq.coordinates[1]);
-                  const isMajor = eq.mag >= 6.0;
-                  const isSignificant = eq.mag >= 4.5;
-                  const color = isMajor ? '#ef4444' : isSignificant ? '#f59e0b' : '#38bdf8';
-                  const radius = Math.max(3, (eq.mag - 2) * 2.8);
-                  const isSelected = selectedEntity?.data?.id === eq.id;
-
-                  return (
-                    <g
-                      key={`quake-2d-${eq.id}`}
-                      className="cursor-pointer group"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedEntity({ type: 'quake', data: eq, screenCoords: [cx, cy] });
-                      }}
-                    >
-                      {isMajor && (
-                        <circle
-                          cx={cx}
-                          cy={cy}
-                          r={radius * 2}
-                          fill="none"
-                          stroke={color}
-                          strokeWidth="1"
-                          className="animate-ping"
-                        />
-                      )}
-                      <circle
-                        cx={cx}
-                        cy={cy}
-                        r={radius}
-                        fill={color}
-                        fillOpacity="0.85"
-                        stroke="#ffffff"
-                        strokeWidth={isSelected ? 2 : 0.75}
-                      />
-                    </g>
-                  );
-                })}
-
-              {/* 2D Fires */}
-              {showFires &&
-                fireAnomalies.map((fire) => {
-                  const [cx, cy] = project2D(fire.lng, fire.lat);
-                  const isSelected = selectedEntity?.data?.id === fire.id;
-                  return (
-                    <g
-                      key={`fire-2d-${fire.id}`}
-                      className="cursor-pointer"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedEntity({ type: 'fire', data: fire, screenCoords: [cx, cy] });
-                      }}
-                    >
-                      <polygon
-                        points={`${cx},${cy - 5} ${cx + 4},${cy + 3} ${cx - 4},${cy + 3}`}
-                        fill="#f97316"
-                        stroke="#fbbf24"
-                        strokeWidth={isSelected ? 1.5 : 0.5}
-                      />
-                    </g>
-                  );
-                })}
-
-              {/* 2D Weather Hubs */}
-              {showWeather &&
-                weatherHubs.map((hub) => {
-                  const [cx, cy] = project2D(hub.lng, hub.lat);
-                  const color = hub.aqiUs > 150 ? '#ef4444' : hub.aqiUs > 100 ? '#f59e0b' : '#00ff41';
-                  const isSelected = selectedEntity?.data?.city === hub.city;
-                  return (
-                    <g
-                      key={`hub-2d-${hub.city}`}
-                      className="cursor-pointer group"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedEntity({ type: 'weather', data: hub, screenCoords: [cx, cy] });
-                      }}
-                    >
-                      <circle
-                        cx={cx}
-                        cy={cy}
-                        r={isSelected ? 5 : 3.5}
-                        fill={color}
-                        stroke="#ffffff"
-                        strokeWidth={isSelected ? 1.5 : 0.5}
-                      />
-                      <text
-                        x={cx + 6}
-                        y={cy + 3}
-                        fill="#888888"
-                        fontSize="7.5"
-                        fontFamily="monospace"
-                        className="pointer-events-none group-hover:fill-white font-medium"
-                      >
-                        {hub.city}
-                      </text>
-                    </g>
-                  );
-                })}
-            </g>
-          )}
-        </svg>
-
-        {/* 3D DRAG INSTRUCTION WATERMARK */}
-        {projectionMode === '3d' && (
-          <div className="absolute bottom-2.5 left-3 text-[10px] font-mono text-[#555555] pointer-events-none flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#00ff41] animate-ping"></span>
-            CLICK & DRAG TO ORBIT 360° // CURRENT VIEW: {rotLat.toFixed(0)}°N, {rotLng.toFixed(0)}°E
-          </div>
-        )}
-
-        {/* RICH HUD INSPECTOR TOOLTIP CARD */}
-        {selectedEntity && (
-          <div
-            id="map-entity-hud-card"
-            className="absolute z-30 bg-[#0c0e12]/95 border border-[#2a3746] rounded-lg p-3.5 shadow-2xl text-xs font-mono max-w-sm backdrop-blur pointer-events-auto"
-            style={{
-              left: `${Math.min(65, Math.max(5, (selectedEntity.screenCoords?.[0] || 400) / 8))} %`,
-              top: `${Math.min(60, Math.max(10, (selectedEntity.screenCoords?.[1] || 200) / 4))} %`,
+              transform: `translate(${panOffset[0]}px, ${panOffset[1]}px) scale(${zoomLevel})`,
+              transformOrigin: '500px 250px',
+              transition: isDragging ? 'none' : 'transform 0.12s ease-out',
             }}
           >
-            {/* Header */}
-            <div className="flex items-center justify-between gap-2 border-b border-[#1f2937] pb-1.5 mb-2">
-              <span className="font-bold uppercase tracking-wider text-[#00ff41] flex items-center gap-1.5 text-[11px]">
-                {selectedEntity.type === 'vessel' && <Ship className="w-3.5 h-3.5 text-cyan-400" />}
-                {selectedEntity.type === 'flight' && <Plane className="w-3.5 h-3.5 text-amber-400" />}
-                {selectedEntity.type === 'chokepoint' && <Anchor className="w-3.5 h-3.5 text-rose-400" />}
-                {selectedEntity.type === 'jamming' && <Radio className="w-3.5 h-3.5 text-purple-400" />}
-                {selectedEntity.type === 'quake' && <Zap className="w-3.5 h-3.5 text-rose-400" />}
-                {selectedEntity.type === 'fire' && <Flame className="w-3.5 h-3.5 text-orange-400" />}
-                {selectedEntity.type === 'disaster' && <Sparkles className="w-3.5 h-3.5 text-sky-400" />}
-                {selectedEntity.type === 'weather' && <Wind className="w-3.5 h-3.5 text-emerald-400" />}
-                {selectedEntity.type.toUpperCase()} TELEMETRY
-              </span>
-              <button
-                type="button"
-                onClick={() => setSelectedEntity(null)}
-                className="text-[#888888] hover:text-white px-1 font-bold"
+            <defs>
+              {/* Photorealistic Ocean Bathymetry Gradient */}
+              <radialGradient id="ocean-bathymetry" cx="50%" cy="50%" r="75%">
+                <stop offset="0%" stopColor="#082342" />
+                <stop offset="35%" stopColor="#05162c" />
+                <stop offset="70%" stopColor="#030c1a" />
+                <stop offset="100%" stopColor="#01060e" />
+              </radialGradient>
+
+              {/* Realistic Biome Topographic Multi-stop Gradients */}
+              <linearGradient id="biome-north-america" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stopColor="#193b22" /> {/* Canadian Boreal */}
+                <stop offset="35%" stopColor="#2c5127" /> {/* Great Lakes */}
+                <stop offset="65%" stopColor="#5c6628" /> {/* Great Plains */}
+                <stop offset="85%" stopColor="#8c773a" /> {/* Southwest Arid */}
+                <stop offset="100%" stopColor="#264821" /> {/* Coastal Green */}
+              </linearGradient>
+
+              <linearGradient id="biome-south-america" x1="0%" y1="0%" x2="50%" y2="100%">
+                <stop offset="0%" stopColor="#15471e" /> {/* Amazon Basin */}
+                <stop offset="45%" stopColor="#0e3d16" />
+                <stop offset="75%" stopColor="#4f5e2d" /> {/* Cerrado/Pampas */}
+                <stop offset="100%" stopColor="#676e65" /> {/* Andes Ridge */}
+              </linearGradient>
+
+              <linearGradient id="biome-europe" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stopColor="#274f2d" />
+                <stop offset="55%" stopColor="#375a31" />
+                <stop offset="100%" stopColor="#766f3f" /> {/* Mediterranean */}
+              </linearGradient>
+
+              <linearGradient id="biome-taiga" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stopColor="#122a1b" />
+                <stop offset="100%" stopColor="#183624" />
+              </linearGradient>
+
+              <linearGradient id="biome-africa" x1="0%" y1="0%" x2="0%" y2="100%">
+                <stop offset="0%" stopColor="#8d6e3c" /> {/* Sahara Sand */}
+                <stop offset="32%" stopColor="#a37f40" /> {/* Sahel */}
+                <stop offset="55%" stopColor="#164d23" /> {/* Congo Rainforest */}
+                <stop offset="80%" stopColor="#4f6029" /> {/* Savanna */}
+                <stop offset="100%" stopColor="#675736" /> {/* Kalahari */}
+              </linearGradient>
+
+              <linearGradient id="biome-desert" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stopColor="#9e7b41" />
+                <stop offset="100%" stopColor="#b58d4e" />
+              </linearGradient>
+
+              <linearGradient id="biome-asia" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stopColor="#183520" /> {/* Siberia */}
+                <stop offset="35%" stopColor="#556037" /> {/* Steppes */}
+                <stop offset="65%" stopColor="#274e2a" /> {/* East China */}
+                <stop offset="85%" stopColor="#6b6148" /> {/* Tibetan Plateau */}
+                <stop offset="100%" stopColor="#184a22" /> {/* Indochina */}
+              </linearGradient>
+
+              <linearGradient id="biome-rainforest" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stopColor="#10471c" />
+                <stop offset="100%" stopColor="#0a3614" />
+              </linearGradient>
+
+              <linearGradient id="biome-australia" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stopColor="#8f4625" /> {/* Red Outback */}
+                <stop offset="55%" stopColor="#a6612f" />
+                <stop offset="100%" stopColor="#3d572d" /> {/* Coastal Green */}
+              </linearGradient>
+
+              <linearGradient id="biome-ice" x1="0%" y1="0%" x2="0%" y2="100%">
+                <stop offset="0%" stopColor="#edf6fc" />
+                <stop offset="100%" stopColor="#cbe1ef" />
+              </linearGradient>
+
+              {/* Coastal Cyan Glow Filter */}
+              <filter id="coastal-glow" x="-20%" y="-20%" width="140%" height="140%">
+                <feGaussianBlur stdDeviation="3" result="blur" />
+                <feComposite in="SourceGraphic" in2="blur" operator="over" />
+              </filter>
+
+              {/* City Lights Glow Filter */}
+              <filter id="city-glow" x="-50%" y="-50%" width="200%" height="200%">
+                <feGaussianBlur stdDeviation="2.5" result="blur" />
+                <feComposite in="SourceGraphic" in2="blur" operator="over" />
+              </filter>
+            </defs>
+
+            {/* Deep Ocean Basin */}
+            <rect width="1000" height="500" fill="url(#ocean-bathymetry)" />
+
+            {/* Bathymetric Oceanic Trenches & Continental Shelves */}
+            <g opacity="0.6">
+              {/* Mid-Atlantic Ridge */}
+              <path
+                d="M 450,60 Q 420,150 460,250 T 450,400"
+                stroke="#0e3a63"
+                strokeWidth="2.5"
+                strokeDasharray="6 4"
+                fill="none"
+              />
+              {/* Mariana Trench & Pacific Rim */}
+              <path
+                d="M 850,120 Q 900,250 860,380"
+                stroke="#0e3a63"
+                strokeWidth="2"
+                strokeDasharray="5 5"
+                fill="none"
+              />
+            </g>
+
+            {/* Precision Latitude & Longitude Graticule Matrix */}
+            <g stroke="#10253d" strokeWidth="0.5" opacity="0.65">
+              {/* Equator */}
+              <line x1="0" y1="250" x2="1000" y2="250" stroke="#1d4d7a" strokeWidth="1" strokeDasharray="4 4" />
+              {/* Tropics */}
+              <line x1="0" y1="185" x2="1000" y2="185" stroke="#16395c" strokeWidth="0.75" />
+              <line x1="0" y1="315" x2="1000" y2="315" stroke="#16395c" strokeWidth="0.75" />
+              {/* Prime Meridian */}
+              <line x1="500" y1="0" x2="500" y2="500" stroke="#1d4d7a" strokeWidth="1" strokeDasharray="4 4" />
+              {/* Meridians */}
+              {[125, 250, 375, 625, 750, 875].map((mx) => (
+                <line key={mx} x1={mx} y1="0" x2={mx} y2="500" />
+              ))}
+              {[62, 125, 375, 437].map((my) => (
+                <line key={my} x1="0" y1={my} x2="1000" y2={my} />
+              ))}
+            </g>
+
+            {/* Render High-Fidelity Realistic Landmasses */}
+            {HIGH_RES_LANDMASSES.map((land) => {
+              const pathData = land.points
+                .map((pt, i) => {
+                  const [px, py] = project2D(pt[0], pt[1]);
+                  return `${i === 0 ? 'M' : 'L'} ${px.toFixed(1)} ${py.toFixed(1)}`;
+                })
+                .join(' ') + ' Z';
+
+              return (
+                <g key={land.name}>
+                  {/* Continental Shelf Turquoise Coastal Shallows */}
+                  <path
+                    d={pathData}
+                    fill="none"
+                    stroke="#00b4d8"
+                    strokeWidth="5"
+                    opacity="0.3"
+                    filter="url(#coastal-glow)"
+                  />
+                  <path
+                    d={pathData}
+                    fill="none"
+                    stroke="#175073"
+                    strokeWidth="2"
+                    opacity="0.8"
+                  />
+
+                  {/* Continent Surface with Biome Texturing */}
+                  <path
+                    d={pathData}
+                    fill={land.biomeGradient}
+                    stroke="#234a36"
+                    strokeWidth="0.85"
+                    className="transition-colors hover:brightness-110"
+                  />
+
+                  {/* Topographic Mountain Ridges */}
+                  {layers.topography && land.elevationRidge && (
+                    <polyline
+                      points={land.elevationRidge
+                        .map((pt) => {
+                          const [rx, ry] = project2D(pt[0], pt[1]);
+                          return `${rx.toFixed(1)},${ry.toFixed(1)}`;
+                        })
+                        .join(' ')}
+                      fill="none"
+                      stroke="#8b7355"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      opacity="0.75"
+                    />
+                  )}
+                </g>
+              );
+            })}
+
+            {/* City Night Lights Layer */}
+            {layers.cityLights &&
+              GLOBAL_CITY_LIGHTS.map((city) => {
+                const [cx, cy] = project2D(city.lng, city.lat);
+                return (
+                  <g key={city.name} opacity="0.85">
+                    <circle
+                      cx={cx}
+                      cy={cy}
+                      r={3.5 * city.intensity}
+                      fill="#ffd166"
+                      opacity="0.6"
+                      filter="url(#city-glow)"
+                    />
+                    <circle cx={cx} cy={cy} r={1.5} fill="#ffffff" />
+                  </g>
+                );
+              })}
+
+            {/* GPS Jamming Zones */}
+            {layers.gpsJamming &&
+              gpsJammingZones.map((zone) => {
+                const [zx, zy] = project2D(zone.lng, zone.lat);
+                const r = (zone.radiusKm / 40000) * 1000;
+
+                return (
+                  <g
+                    key={zone.id}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      playTacticalBlip(1400);
+                      setSelectedEntity({
+                        type: 'jamming',
+                        title: `GPS/EW Jamming: ${zone.region}`,
+                        subtitle: zone.primaryAffectedAirspace,
+                        lat: zone.lat,
+                        lng: zone.lng,
+                        severity: 'FLASH',
+                        attributes: [
+                          { label: 'Severity', value: zone.severity, color: 'text-amber-400' },
+                          { label: 'Radius', value: `${zone.radiusKm} km`, color: 'text-white' },
+                          { label: 'FIR Airspace', value: zone.primaryAffectedAirspace, color: 'text-[#00d1ff]' },
+                        ],
+                        description: zone.impactDescription,
+                        deskId: 'airtraffic',
+                        deskLabel: 'ADS-B Airspace',
+                        rawItem: zone,
+                      });
+                    }}
+                    className="cursor-pointer"
+                  >
+                    <circle
+                      cx={zx}
+                      cy={zy}
+                      r={Math.max(14, r)}
+                      fill="rgba(168, 85, 247, 0.15)"
+                      stroke="#a855f7"
+                      strokeWidth="1.5"
+                      strokeDasharray="4 2"
+                    />
+                    <circle
+                      cx={zx}
+                      cy={zy}
+                      r={Math.max(7, r * 0.5)}
+                      fill="rgba(168, 85, 247, 0.25)"
+                      stroke="#c084fc"
+                      strokeWidth="1"
+                    />
+                  </g>
+                );
+              })}
+
+            {/* Animated Real-Time Wind Flow Streamlines */}
+            {layers.windFlow &&
+              GLOBAL_WIND_VECTORS.map((wv, idx) => {
+                const [wx, wy] = project2D(wv.lng, wv.lat);
+                const len = 16 + (wv.speedKmh / 150) * 14;
+                const rad = (wv.directionDeg * Math.PI) / 180;
+                const endX = wx + Math.sin(rad) * len;
+                const endY = wy - Math.cos(rad) * len;
+
+                const windColor =
+                  wv.speedKmh > 90
+                    ? '#f43f5e'
+                    : wv.speedKmh > 60
+                    ? '#fbbf24'
+                    : wv.speedKmh > 35
+                    ? '#34d399'
+                    : '#38bdf8';
+
+                return (
+                  <g key={`wind-${idx}`} opacity="0.8">
+                    <line
+                      x1={wx}
+                      y1={wy}
+                      x2={endX}
+                      y2={endY}
+                      stroke={windColor}
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                    />
+                    <circle cx={endX} cy={endY} r="1.5" fill={windColor} />
+                  </g>
+                );
+              })}
+
+            {/* Active Cyclones & Tropical Storms */}
+            {layers.storms &&
+              ACTIVE_GLOBAL_STORMS.map((storm) => {
+                const [sx, sy] = project2D(storm.lng, storm.lat);
+
+                return (
+                  <g
+                    key={storm.id}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      playTacticalBlip(1500);
+                      setSelectedEntity({
+                        type: 'storm',
+                        title: storm.name,
+                        subtitle: `${storm.basin} • Sustained ${storm.sustainedWindKmh} km/h`,
+                        lat: storm.lat,
+                        lng: storm.lng,
+                        severity: 'CRITICAL',
+                        attributes: [
+                          { label: 'Category', value: storm.category, color: 'text-rose-400' },
+                          { label: 'Sustained Winds', value: `${storm.sustainedWindKmh} km/h`, color: 'text-white' },
+                          { label: 'Gusts', value: `${storm.gustsKmh} km/h`, color: 'text-amber-400' },
+                          { label: 'Pressure', value: `${storm.centralPressureHpa} hPa`, color: 'text-[#00d1ff]' },
+                          { label: 'Movement', value: storm.movementHeading, color: 'text-white' },
+                          { label: 'Status', value: storm.warningStatus, color: 'text-rose-300' },
+                        ],
+                        description: `Extreme meteorological cyclonic system tracked with central vortex pressure of ${storm.centralPressureHpa} hPa.`,
+                        deskId: 'geospatial',
+                        deskLabel: 'Geospatial Desk',
+                        rawItem: storm,
+                      });
+                    }}
+                    className="cursor-pointer"
+                  >
+                    <circle
+                      cx={sx}
+                      cy={sy}
+                      r="18"
+                      fill="rgba(6, 182, 212, 0.15)"
+                      stroke="#06b6d4"
+                      strokeWidth="1.5"
+                      strokeDasharray="6 3"
+                    />
+                    <circle
+                      cx={sx}
+                      cy={sy}
+                      r="28"
+                      fill="none"
+                      stroke="#22d3ee"
+                      strokeWidth="1"
+                      strokeDasharray="8 4"
+                      opacity="0.75"
+                    />
+                    <circle cx={sx} cy={sy} r="4" fill="#06b6d4" className="animate-ping" />
+                    <circle cx={sx} cy={sy} r="3" fill="#ffffff" />
+                    <text
+                      x={sx + 12}
+                      y={sy - 10}
+                      fill="#22d3ee"
+                      fontSize="10"
+                      fontWeight="bold"
+                      fontFamily="monospace"
+                    >
+                      {storm.name.split(' ')[0]}
+                    </text>
+                  </g>
+                );
+              })}
+
+            {/* Maritime Strategic Chokepoints */}
+            {layers.chokepoints &&
+              chokepoints.map((cp) => {
+                const [cx, cy] = project2D(cp.lng, cp.lat);
+                const isHighRisk = cp.riskScore > 60;
+
+                return (
+                  <g
+                    key={cp.id}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      playTacticalBlip(1400);
+                      setSelectedEntity({
+                        type: 'chokepoint',
+                        title: `Strategic Chokepoint: ${cp.name}`,
+                        subtitle: cp.location,
+                        lat: cp.lat,
+                        lng: cp.lng,
+                        severity: isHighRisk ? 'FLASH' : 'PRIORITY',
+                        attributes: [
+                          { label: 'Risk Score', value: `${cp.riskScore}/100`, color: isHighRisk ? 'text-rose-400' : 'text-amber-400' },
+                          { label: 'Status', value: cp.status, color: 'text-white' },
+                          { label: 'Transit Flow', value: cp.flowDescription, color: 'text-[#00ff41]' },
+                          { label: 'Vessels Waiting', value: cp.vesselsWaiting, color: 'text-white' },
+                          { label: 'Avg Delay', value: `${cp.averageDelayHours} hrs`, color: 'text-amber-300' },
+                        ],
+                        description: cp.securityAlert || `Key international maritime transit bottleneck handling ${cp.flowDescription}.`,
+                        deskId: 'infrastructure',
+                        deskLabel: 'Infrastructure Desk',
+                        rawItem: cp,
+                      });
+                    }}
+                    className="cursor-pointer"
+                  >
+                    <circle
+                      cx={cx}
+                      cy={cy}
+                      r="6"
+                      fill={isHighRisk ? 'rgba(239, 68, 68, 0.35)' : 'rgba(0, 209, 255, 0.35)'}
+                      stroke={isHighRisk ? '#ef4444' : '#00d1ff'}
+                      strokeWidth="1.5"
+                    />
+                    <text
+                      x={cx + 8}
+                      y={cy + 3}
+                      fill={isHighRisk ? '#f87171' : '#7dd3fc'}
+                      fontSize="9"
+                      fontFamily="monospace"
+                      fontWeight="bold"
+                    >
+                      {cp.name}
+                    </text>
+                  </g>
+                );
+              })}
+
+            {/* Geopolitical Kinetic Strikes */}
+            {layers.strikes &&
+              ACTIVE_KINETIC_STRIKES.map((strike) => {
+                const [kx, ky] = project2D(strike.lng, strike.lat);
+
+                return (
+                  <g
+                    key={strike.id}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      playTacticalBlip(1500);
+                      setSelectedEntity({
+                        type: 'strike',
+                        title: strike.title,
+                        subtitle: `${strike.type} • ${strike.region}`,
+                        lat: strike.lat,
+                        lng: strike.lng,
+                        severity: strike.severity,
+                        attributes: [
+                          { label: 'Type', value: strike.type, color: 'text-rose-400' },
+                          { label: 'Actor', value: strike.actor, color: 'text-white' },
+                          { label: 'Target', value: strike.targetType, color: 'text-[#00d1ff]' },
+                          { label: 'Impact', value: strike.casualtyEstimate || 'Report Pending', color: 'text-amber-400' },
+                        ],
+                        description: `Kinetic incident registered on live OSINT mapping feeds.`,
+                        sourceUrl: strike.sourceUrl,
+                        deskId: 'geospatial',
+                        deskLabel: 'Geospatial Desk',
+                        rawItem: strike,
+                      });
+                    }}
+                    className="cursor-pointer"
+                  >
+                    <circle cx={kx} cy={ky} r="10" fill="rgba(244, 63, 94, 0.35)" className="animate-ping" />
+                    <polygon
+                      points={`${kx},${ky - 6} ${kx + 6},${ky + 4} ${kx - 6},${ky + 4}`}
+                      fill="#f43f5e"
+                      stroke="#ffffff"
+                      strokeWidth="0.75"
+                    />
+                  </g>
+                );
+              })}
+
+            {/* NASA FIRMS Wildfires (Thermal Hotspots) */}
+            {layers.wildfires &&
+              fireAnomalies.map((fire) => {
+                const [fx, fy] = project2D(fire.lng, fire.lat);
+                const isHighConf = fire.confidence === 'high';
+
+                return (
+                  <g
+                    key={fire.id}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      playTacticalBlip(1300);
+                      setSelectedEntity({
+                        type: 'wildfire',
+                        title: `Thermal Hotspot: ${fire.region || 'Active Anomaly'}`,
+                        subtitle: `NASA FIRMS VIIRS Sensor • FRP ${fire.frp} MW`,
+                        lat: fire.lat,
+                        lng: fire.lng,
+                        severity: fire.frp > 100 ? 'FLASH' : 'PRIORITY',
+                        attributes: [
+                          { label: 'FRP (Power)', value: `${fire.frp} MW`, color: 'text-orange-400' },
+                          { label: 'Brightness', value: `${fire.brightness} K`, color: 'text-white' },
+                          { label: 'Confidence', value: fire.confidence?.toUpperCase() || 'HIGH', color: isHighConf ? 'text-[#00ff41]' : 'text-amber-400' },
+                          { label: 'Acquired Date', value: fire.acqDate, color: 'text-[#888888]' },
+                        ],
+                        description: `Satellite thermal radiation detection with fire radiative power of ${fire.frp} MW.`,
+                        deskId: 'geospatial',
+                        deskLabel: 'Geospatial Desk',
+                        rawItem: fire,
+                      });
+                    }}
+                    className="cursor-pointer"
+                  >
+                    <circle
+                      cx={fx}
+                      cy={fy}
+                      r={Math.min(7, Math.max(3, fire.frp / 25))}
+                      fill="#f97316"
+                      stroke="#ffedd5"
+                      strokeWidth="0.5"
+                    />
+                  </g>
+                );
+              })}
+
+            {/* USGS Earthquakes */}
+            {layers.earthquakes &&
+              earthquakes.map((eq) => {
+                if (!eq.coordinates || eq.coordinates.length < 2) return null;
+                const [qx, qy] = project2D(eq.coordinates[0], eq.coordinates[1]);
+                const isMajor = eq.mag >= 6.0;
+                const isSignificant = eq.mag >= 4.5;
+                const radius = Math.max(4.5, (eq.mag - 2.5) * 3.2);
+                const color = isMajor ? '#ef4444' : isSignificant ? '#f59e0b' : '#00ff41';
+
+                return (
+                  <g
+                    key={eq.id}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      playTacticalBlip(1400);
+                      setSelectedEntity({
+                        type: 'earthquake',
+                        title: `M${eq.mag.toFixed(1)} - ${eq.place}`,
+                        subtitle: `USGS Seismology • Depth ${eq.coordinates[2]} km`,
+                        lat: eq.coordinates[1],
+                        lng: eq.coordinates[0],
+                        severity: isMajor ? 'FLASH' : isSignificant ? 'PRIORITY' : 'ROUTINE',
+                        attributes: [
+                          { label: 'Magnitude', value: `M${eq.mag.toFixed(1)}`, color: isMajor ? 'text-rose-400' : 'text-amber-400' },
+                          { label: 'Depth', value: `${eq.coordinates[2]} km`, color: 'text-white' },
+                          { label: 'Tsunami Watch', value: eq.tsunami === 1 ? 'ACTIVE' : 'NONE', color: eq.tsunami === 1 ? 'text-rose-400' : 'text-[#00ff41]' },
+                          { label: 'Felt Reports', value: eq.felt || 'N/A', color: 'text-white' },
+                        ],
+                        description: `Tectonic rupture registered at ${eq.place}. Depth: ${eq.coordinates[2]}km.`,
+                        sourceUrl: eq.url,
+                        deskId: 'geospatial',
+                        deskLabel: 'Geospatial Desk',
+                        rawItem: eq,
+                      });
+                    }}
+                    className="cursor-pointer"
+                  >
+                    {isSignificant && (
+                      <circle
+                        cx={qx}
+                        cy={qy}
+                        r={radius * 2}
+                        fill="none"
+                        stroke={color}
+                        strokeWidth="1"
+                        opacity="0.45"
+                        className="animate-ping"
+                      />
+                    )}
+                    <circle cx={qx} cy={qy} r={radius} fill={color} stroke="#ffffff" strokeWidth="1" />
+                    {isSignificant && (
+                      <text
+                        x={qx + radius + 4}
+                        y={qy + 3}
+                        fill={color}
+                        fontSize="9"
+                        fontFamily="monospace"
+                        fontWeight="bold"
+                      >
+                        M{eq.mag.toFixed(1)}
+                      </text>
+                    )}
+                  </g>
+                );
+              })}
+
+            {/* AIS Maritime Vessels */}
+            {layers.vessels &&
+              trackedVessels.map((vessel) => {
+                const [vx, vy] = project2D(vessel.lng, vessel.lat);
+                const isAnomaly = vessel.anomalyFlag && vessel.anomalyFlag !== 'Nominal';
+                const rad = ((vessel.courseDegrees || 0) * Math.PI) / 180;
+                const endX = vx + Math.sin(rad) * 10;
+                const endY = vy - Math.cos(rad) * 10;
+
+                return (
+                  <g
+                    key={vessel.mmsi}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      playTacticalBlip(1400);
+                      setSelectedEntity({
+                        type: 'vessel',
+                        title: vessel.vesselName,
+                        subtitle: `${vessel.vesselType} • Flag: ${vessel.flag}`,
+                        lat: vessel.lat,
+                        lng: vessel.lng,
+                        severity: isAnomaly ? 'FLASH' : 'ROUTINE',
+                        attributes: [
+                          { label: 'Speed', value: `${vessel.speedKnots} kts`, color: 'text-white' },
+                          { label: 'Course', value: `${vessel.courseDegrees}°`, color: 'text-white' },
+                          { label: 'Draught', value: `${vessel.draughtMeters}m`, color: 'text-[#00d1ff]' },
+                          { label: 'Destination', value: vessel.destination, color: 'text-[#00ff41]' },
+                          { label: 'Anomaly Flag', value: vessel.anomalyFlag || 'Nominal', color: isAnomaly ? 'text-rose-400' : 'text-[#00ff41]' },
+                        ],
+                        description: `Commercial transit tracked via satellite AIS. Destination: ${vessel.destination}. Current speed ${vessel.speedKnots} knots.`,
+                        deskId: 'infrastructure',
+                        deskLabel: 'Infrastructure Desk',
+                        rawItem: vessel,
+                      });
+                    }}
+                    className="cursor-pointer"
+                  >
+                    <line x1={vx} y1={vy} x2={endX} y2={endY} stroke={isAnomaly ? '#f43f5e' : '#38bdf8'} strokeWidth="1.5" />
+                    <circle
+                      cx={vx}
+                      cy={vy}
+                      r="4"
+                      fill={isAnomaly ? '#f43f5e' : '#0284c7'}
+                      stroke="#ffffff"
+                      strokeWidth="1"
+                    />
+                  </g>
+                );
+              })}
+
+            {/* ADS-B Aircraft Transponders */}
+            {layers.flights &&
+              emergencySquawks.map((flight) => {
+                if (flight.lat === undefined || flight.lng === undefined) return null;
+                const [ax, ay] = project2D(flight.lng, flight.lat);
+                const isEmergency = flight.squawk === '7700' || flight.squawk === '7600';
+                const headingRad = ((flight.heading || 0) * Math.PI) / 180;
+                const vLen = 12;
+                const endX = ax + Math.sin(headingRad) * vLen;
+                const endY = ay - Math.cos(headingRad) * vLen;
+
+                return (
+                  <g
+                    key={flight.icao24}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      playTacticalBlip(1500);
+                      setSelectedEntity({
+                        type: 'flight',
+                        title: `Flight ${flight.callsign} (${flight.icao24})`,
+                        subtitle: `${flight.aircraftType || 'Aircraft'} • ${flight.originCountry}`,
+                        lat: flight.lat!,
+                        lng: flight.lng!,
+                        severity: isEmergency ? 'FLASH' : 'PRIORITY',
+                        attributes: [
+                          { label: 'Squawk Code', value: flight.squawk, color: isEmergency ? 'text-rose-400' : 'text-amber-400' },
+                          { label: 'Squawk Type', value: flight.squawkType, color: 'text-white' },
+                          { label: 'Altitude', value: `${flight.altitudeFt || 0} ft`, color: 'text-[#00d1ff]' },
+                          { label: 'Speed', value: `${flight.velocityKnots || 0} kts`, color: 'text-white' },
+                          { label: 'Heading', value: `${flight.heading || 0}°`, color: 'text-white' },
+                          { label: 'Route', value: flight.route || 'Tactical Track', color: 'text-[#00ff41]' },
+                        ],
+                        description: `ADS-B transponder broadcast for ${flight.callsign}. Squawk ${flight.squawk} (${flight.squawkType}).`,
+                        deskId: 'infrastructure',
+                        deskLabel: 'Infrastructure Desk',
+                        rawItem: flight,
+                      });
+                    }}
+                    className="cursor-pointer"
+                  >
+                    {isEmergency && (
+                      <circle cx={ax} cy={ay} r="10" fill="none" stroke="#ef4444" strokeWidth="1.5" className="animate-ping" />
+                    )}
+                    <line x1={ax} y1={ay} x2={endX} y2={endY} stroke={isEmergency ? '#ef4444' : '#38bdf8'} strokeWidth="1.5" />
+                    <polygon
+                      points={`${ax},${ay - 4} ${ax + 3},${ay + 3} ${ax - 3},${ay + 3}`}
+                      fill={isEmergency ? '#ef4444' : '#0284c7'}
+                      stroke="#ffffff"
+                      strokeWidth="0.75"
+                    />
+                    <text
+                      x={ax + 6}
+                      y={ay + 2}
+                      fill={isEmergency ? '#f87171' : '#7dd3fc'}
+                      fontSize="9"
+                      fontFamily="monospace"
+                      fontWeight="bold"
+                    >
+                      {flight.callsign}
+                    </text>
+                  </g>
+                );
+              })}
+
+            {/* X / Twitter Live Disaster Feeds */}
+            {layers.disasters &&
+              disasterTweets.map((tweet) => {
+                if (!tweet.location) return null;
+                const [tx, ty] = project2D(tweet.location.lng, tweet.location.lat);
+                const isCritical = tweet.urgency === 'CRITICAL BREAKING';
+
+                return (
+                  <g
+                    key={tweet.id}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      playTacticalBlip(1500);
+                      setSelectedEntity({
+                        type: 'disaster',
+                        title: `${tweet.disasterType}: ${tweet.location.name}`,
+                        subtitle: `${tweet.authorName} (${tweet.handle}) • ${tweet.badgeType}`,
+                        lat: tweet.location.lat,
+                        lng: tweet.location.lng,
+                        severity: isCritical ? 'FLASH' : 'PRIORITY',
+                        attributes: [
+                          { label: 'Disaster Type', value: tweet.disasterType, color: 'text-rose-400' },
+                          { label: 'Urgency', value: tweet.urgency, color: isCritical ? 'text-rose-300' : 'text-amber-300' },
+                          { label: 'Location', value: tweet.location.name, color: 'text-white' },
+                          { label: 'Verified Org', value: tweet.authorName, color: 'text-[#00ff41]' },
+                          { label: 'Dispatched', value: tweet.timeAgo, color: 'text-[#888888]' },
+                        ],
+                        description: tweet.text,
+                        sourceUrl: tweet.sourceUrl,
+                        deskId: 'geospatial',
+                        deskLabel: 'Geospatial Desk',
+                        rawItem: tweet,
+                      });
+                    }}
+                    className="cursor-pointer"
+                  >
+                    <circle
+                      cx={tx}
+                      cy={ty}
+                      r="7"
+                      fill={isCritical ? 'rgba(239, 68, 68, 0.4)' : 'rgba(0, 209, 255, 0.4)'}
+                      stroke={isCritical ? '#ef4444' : '#00d1ff'}
+                      strokeWidth="1.5"
+                    />
+                    <circle cx={tx} cy={ty} r="3" fill="#ffffff" />
+                  </g>
+                );
+              })}
+
+            {/* User Location Focal Pin */}
+            {layers.userFocal && userLocation && (
+              <g
+                onClick={(e) => {
+                  e.stopPropagation();
+                  playTacticalBlip(1600);
+                  onOpenWhatsAppModal();
+                }}
+                className="cursor-pointer"
               >
-                ✕
-              </button>
-            </div>
-
-            {/* 1. VESSEL INSPECTOR */}
-            {selectedEntity.type === 'vessel' && (
-              <div className="space-y-1.5 text-[#d4d4d4] text-[11px]">
-                <div className="flex items-center justify-between">
-                  <span className="font-sans font-bold text-white text-xs">{selectedEntity.data.vesselName}</span>
-                  <span className="px-1.5 py-0.2 rounded text-[10px] bg-[#161616] text-[#00d1ff] border border-[#2a2a2a]">
-                    {selectedEntity.data.vesselType}
-                  </span>
-                </div>
-                <div className="grid grid-cols-2 gap-2 text-[10px] bg-[#05080c] p-2 rounded border border-[#1a2332]">
-                  <div>MMSI: <strong className="text-white">{selectedEntity.data.mmsi}</strong></div>
-                  <div>Flag: <strong className="text-white">{selectedEntity.data.flag}</strong></div>
-                  <div>Speed: <strong className="text-[#00ff41]">{selectedEntity.data.speedKnots} kts</strong></div>
-                  <div>Course: <strong className="text-white">{selectedEntity.data.courseDegrees}°</strong></div>
-                  <div>Draught: <strong className="text-white">{selectedEntity.data.draughtMeters} m</strong></div>
-                  <div>Coordinates: <strong className="text-[#00d1ff]">{selectedEntity.data.lat.toFixed(2)}°, {selectedEntity.data.lng.toFixed(2)}°</strong></div>
-                </div>
-                <div>Destination: <strong className="text-white">{selectedEntity.data.destination}</strong></div>
-                {selectedEntity.data.anomalyFlag && selectedEntity.data.anomalyFlag !== 'Nominal' && (
-                  <div className="p-1.5 rounded bg-rose-950/40 border border-rose-800/60 text-rose-300 text-[10px]">
-                    ⚠️ <strong>ANOMALY:</strong> {selectedEntity.data.anomalyFlag}
-                  </div>
-                )}
-                <a
-                  href={`https://www.marinetraffic.com/en/ais/details/ships/mmsi:${selectedEntity.data.mmsi}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-block mt-1 text-[#00d1ff] hover:underline text-[10px]"
-                >
-                  Live AIS Track on MarineTraffic ↗
-                </a>
-              </div>
+                {(() => {
+                  const [ux, uy] = project2D(userLocation.lng, userLocation.lat);
+                  return (
+                    <>
+                      <circle cx={ux} cy={uy} r="35" fill="none" stroke="#00ff41" strokeWidth="1" strokeDasharray="3 3" opacity="0.3" />
+                      <circle cx={ux} cy={uy} r="20" fill="none" stroke="#00ff41" strokeWidth="1.5" strokeDasharray="4 2" opacity="0.6" />
+                      <circle cx={ux} cy={uy} r="8" fill="rgba(0, 255, 65, 0.3)" className="animate-ping" />
+                      <circle cx={ux} cy={uy} r="5" fill="#00ff41" stroke="#ffffff" strokeWidth="1.5" />
+                      <text
+                        x={ux + 8}
+                        y={uy + 3}
+                        fill="#00ff41"
+                        fontSize="9"
+                        fontFamily="monospace"
+                        fontWeight="bold"
+                      >
+                        YOU ({userLocation.name?.slice(0, 10) || 'LOCATION'})
+                      </text>
+                    </>
+                  );
+                })()}
+              </g>
             )}
-
-            {/* 2. FLIGHT INSPECTOR */}
-            {selectedEntity.type === 'flight' && (
-              <div className="space-y-1.5 text-[#d4d4d4] text-[11px]">
-                <div className="flex items-center justify-between">
-                  <span className="font-sans font-bold text-white text-xs">{selectedEntity.data.callsign}</span>
-                  <span className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${
-                    selectedEntity.data.squawk === '7700' ? 'bg-rose-950 text-rose-300 border border-rose-700' : 'bg-[#181818] text-amber-300'
-                  }`}>
-                    {selectedEntity.data.squawkType}
-                  </span>
-                </div>
-                <div className="text-[10px] text-[#aaaaaa]">{selectedEntity.data.aircraftType} • {selectedEntity.data.originCountry}</div>
-                <div className="grid grid-cols-2 gap-2 text-[10px] bg-[#05080c] p-2 rounded border border-[#1a2332]">
-                  <div>ICAO24: <strong className="text-white">{selectedEntity.data.icao24}</strong></div>
-                  <div>Squawk: <strong className={selectedEntity.data.squawk === '7700' ? 'text-rose-400 font-bold' : 'text-white'}>{selectedEntity.data.squawk}</strong></div>
-                  <div>Altitude: <strong className="text-[#38bdf8]">{selectedEntity.data.altitudeFt?.toLocaleString()} ft</strong></div>
-                  <div>Speed: <strong className="text-white">{selectedEntity.data.velocityKnots} kts</strong></div>
-                  <div>Heading: <strong className="text-white">{selectedEntity.data.heading}°</strong></div>
-                  <div>Coords: <strong className="text-[#00d1ff]">{selectedEntity.data.lat?.toFixed(2)}°, {selectedEntity.data.lng?.toFixed(2)}°</strong></div>
-                </div>
-                <div>Route: <strong className="text-white">{selectedEntity.data.route}</strong></div>
-                {selectedEntity.data.details && (
-                  <p className="text-[10px] text-[#9ca3af] italic bg-[#0a0a0a] p-1.5 rounded border border-[#1f1f1f]">
-                    {selectedEntity.data.details}
-                  </p>
-                )}
-                <a
-                  href={`https://www.flightradar24.com/${selectedEntity.data.callsign}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-block mt-1 text-[#38bdf8] hover:underline text-[10px]"
-                >
-                  Live ADS-B Radar on FlightRadar24 ↗
-                </a>
-              </div>
-            )}
-
-            {/* 3. CHOKEPOINT INSPECTOR */}
-            {selectedEntity.type === 'chokepoint' && (
-              <div className="space-y-1.5 text-[#d4d4d4] text-[11px]">
-                <div className="flex items-center justify-between">
-                  <span className="font-sans font-bold text-white text-xs">{selectedEntity.data.name}</span>
-                  <span className="px-1.5 py-0.2 rounded text-[10px] bg-rose-950 text-rose-300 font-bold border border-rose-800">
-                    {selectedEntity.data.status}
-                  </span>
-                </div>
-                <div className="text-[10px] text-[#888888]">{selectedEntity.data.location}</div>
-                <div className="grid grid-cols-2 gap-2 text-[10px] bg-[#05080c] p-2 rounded border border-[#1a2332]">
-                  <div>Risk Index: <strong className="text-rose-400">{selectedEntity.data.riskScore}/100</strong></div>
-                  <div>24h Transits: <strong className="text-white">{selectedEntity.data.transitVolume24h}</strong></div>
-                  <div>Avg Delay: <strong className="text-amber-400">{selectedEntity.data.averageDelayHours} hrs</strong></div>
-                  <div>Queue: <strong className="text-white">{selectedEntity.data.vesselsWaiting} waiting</strong></div>
-                </div>
-                <div>Flow: <strong className="text-white">{selectedEntity.data.flowDescription}</strong></div>
-                {selectedEntity.data.securityAlert && (
-                  <div className="p-1.5 rounded bg-amber-950/30 border border-amber-800/50 text-amber-300 text-[10px]">
-                    📢 {selectedEntity.data.securityAlert}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* 4. GPS JAMMING INSPECTOR */}
-            {selectedEntity.type === 'jamming' && (
-              <div className="space-y-1.5 text-[#d4d4d4] text-[11px]">
-                <span className="font-sans font-bold text-white text-xs">{selectedEntity.data.region}</span>
-                <div className="text-[10px] text-purple-300 font-bold">Severity: {selectedEntity.data.severity}</div>
-                <div className="grid grid-cols-2 gap-2 text-[10px] bg-[#05080c] p-2 rounded border border-[#1a2332]">
-                  <div>Radius: <strong className="text-white">{selectedEntity.data.radiusKm} km</strong></div>
-                  <div>Coordinates: <strong className="text-[#00d1ff]">{selectedEntity.data.lat.toFixed(2)}°, {selectedEntity.data.lng.toFixed(2)}°</strong></div>
-                </div>
-                <p className="text-[10px] text-[#e5e5e5]">{selectedEntity.data.impactDescription}</p>
-                <div className="text-[10px] text-[#888888]">Primary FIRs: {selectedEntity.data.primaryAffectedAirspace}</div>
-              </div>
-            )}
-
-            {/* 5. DISASTER TWEET INSPECTOR */}
-            {selectedEntity.type === 'disaster' && (
-              <div className="space-y-1.5 text-[#d4d4d4] text-[11px]">
-                <div className="flex items-center justify-between">
-                  <span className="font-sans font-bold text-white text-xs">{selectedEntity.data.authorName}</span>
-                  <span className="px-1.5 py-0.2 rounded text-[10px] bg-rose-950 text-rose-300 font-bold">
-                    {selectedEntity.data.urgency}
-                  </span>
-                </div>
-                <div className="text-[10px] text-[#38bdf8] font-mono">{selectedEntity.data.handle} • {selectedEntity.data.timeAgo}</div>
-                <p className="text-[11px] text-[#f3f4f6] leading-relaxed bg-[#05080c] p-2 rounded border border-[#1a2332]">
-                  {selectedEntity.data.text}
-                </p>
-                <div className="text-[10px] text-[#888888] flex items-center justify-between">
-                  <span>Location: {selectedEntity.data.location.name}</span>
-                  <span>RT: {selectedEntity.data.metrics.retweets} • Likes: {selectedEntity.data.metrics.likes}</span>
-                </div>
-                <a
-                  href={selectedEntity.data.sourceUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-block mt-1 text-[#38bdf8] hover:underline text-[10px]"
-                >
-                  View Original Dispatch on X ↗
-                </a>
-              </div>
-            )}
-
-            {/* 6. EARTHQUAKE INSPECTOR */}
-            {selectedEntity.type === 'quake' && (
-              <div className="space-y-1.5 text-[#d4d4d4] text-[11px]">
-                <p className="font-sans font-bold text-white text-xs">{selectedEntity.data.place}</p>
-                <div className="grid grid-cols-2 gap-2 text-[10px] bg-[#05080c] p-2 rounded border border-[#1a2332]">
-                  <div>Magnitude: <strong className="text-rose-400 font-bold">M{selectedEntity.data.mag}</strong></div>
-                  <div>Depth: <strong className="text-[#00d1ff]">{selectedEntity.data.coordinates[2]} km</strong></div>
-                  <div>Coordinates: <strong className="text-white">{selectedEntity.data.coordinates[1].toFixed(2)}°, {selectedEntity.data.coordinates[0].toFixed(2)}°</strong></div>
-                  <div>Tsunami: <strong className={selectedEntity.data.tsunami ? 'text-rose-400' : 'text-[#00ff41]'}>{selectedEntity.data.tsunami ? 'WARNING' : 'NONE'}</strong></div>
-                </div>
-                <a
-                  href={selectedEntity.data.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-block mt-1 text-[#00ff41] hover:underline text-[10px]"
-                >
-                  View on USGS.gov ↗
-                </a>
-              </div>
-            )}
-
-            {/* 7. THERMAL FIRE INSPECTOR */}
-            {selectedEntity.type === 'fire' && (
-              <div className="space-y-1 text-[#d4d4d4] text-[11px]">
-                <p className="font-sans font-bold text-white text-xs">{selectedEntity.data.region}</p>
-                <div>Radiative Power: <strong className="text-amber-400">{selectedEntity.data.frp} MW</strong></div>
-                <div>Confidence: <strong className="text-amber-300 uppercase">{selectedEntity.data.confidence}</strong></div>
-                <div>Detected: {selectedEntity.data.acqDate}</div>
-              </div>
-            )}
-
-            {/* 8. WEATHER HUB INSPECTOR */}
-            {selectedEntity.type === 'weather' && (
-              <div className="space-y-1 text-[#d4d4d4] text-[11px]">
-                <p className="font-sans font-bold text-white text-xs">{selectedEntity.data.city}, {selectedEntity.data.country}</p>
-                <div>AQI: <strong className="text-[#00d1ff] font-bold">{selectedEntity.data.aqiUs} ({selectedEntity.data.aqiCategory})</strong></div>
-                <div>PM2.5: {selectedEntity.data.pm25} µg/m³ | Temp: {selectedEntity.data.tempC}°C</div>
-                <div>Condition: {selectedEntity.data.condition}</div>
-              </div>
-            )}
-          </div>
+          </svg>
         )}
+
+        {/* ========================================================================= */}
+        {/* 3D INTERACTIVE PHOTOREALISTIC ORBIT GLOBE PROJECTION                      */}
+        {/* ========================================================================= */}
+        {viewMode === '3d' && (
+          <svg viewBox="0 0 1000 500" className="w-full h-full block pointer-events-auto">
+            <defs>
+              <radialGradient id="globe-sphere-grad" cx="35%" cy="35%" r="65%">
+                <stop offset="0%" stopColor="#0f2f54" />
+                <stop offset="50%" stopColor="#07172e" />
+                <stop offset="85%" stopColor="#020814" />
+                <stop offset="100%" stopColor="#000000" />
+              </radialGradient>
+              <filter id="globe-glow">
+                <feGaussianBlur stdDeviation="8" result="blur" />
+                <feComposite in="SourceGraphic" in2="blur" operator="over" />
+              </filter>
+            </defs>
+
+            {/* Atmosphere Rayleigh Scattering Halo */}
+            <circle cx="500" cy="250" r="195" fill="none" stroke="#00d1ff" strokeWidth="4" opacity="0.3" filter="url(#globe-glow)" />
+
+            {/* Sphere Background */}
+            <circle cx="500" cy="250" r="190" fill="url(#globe-sphere-grad)" stroke="#1a3b66" strokeWidth="1.5" />
+
+            {/* 3D High-Res Continents */}
+            {HIGH_RES_LANDMASSES.map((land) => {
+              const projectedPoints = land.points.map((pt) =>
+                project3D(pt[0], pt[1], globeRotation[0], globeRotation[1], 190, 500, 250)
+              );
+
+              const visibleCount = projectedPoints.filter((p) => p.visible).length;
+              if (visibleCount < 2) return null;
+
+              const pathData = projectedPoints
+                .map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`)
+                .join(' ') + ' Z';
+
+              return (
+                <path
+                  key={land.name}
+                  d={pathData}
+                  fill={land.biomeGradient}
+                  stroke="#264834"
+                  strokeWidth="0.85"
+                  opacity="0.95"
+                />
+              );
+            })}
+
+            {/* 3D Earthquakes */}
+            {layers.earthquakes &&
+              earthquakes.map((eq) => {
+                if (!eq.coordinates || eq.coordinates.length < 2) return null;
+                const proj = project3D(
+                  eq.coordinates[0],
+                  eq.coordinates[1],
+                  globeRotation[0],
+                  globeRotation[1],
+                  190,
+                  500,
+                  250
+                );
+                if (!proj.visible) return null;
+
+                const isMajor = eq.mag >= 6.0;
+                const color = isMajor ? '#ef4444' : '#f59e0b';
+
+                return (
+                  <circle
+                    key={eq.id}
+                    cx={proj.x}
+                    cy={proj.y}
+                    r={Math.max(3.5, (eq.mag - 3) * 2.5)}
+                    fill={color}
+                    stroke="#ffffff"
+                    strokeWidth="1"
+                    onClick={() => {
+                      playTacticalBlip(1400);
+                      setSelectedEntity({
+                        type: 'earthquake',
+                        title: `M${eq.mag.toFixed(1)} - ${eq.place}`,
+                        subtitle: `USGS Seismology • Depth ${eq.coordinates[2]} km`,
+                        lat: eq.coordinates[1],
+                        lng: eq.coordinates[0],
+                        severity: isMajor ? 'FLASH' : 'PRIORITY',
+                        attributes: [
+                          { label: 'Magnitude', value: `M${eq.mag.toFixed(1)}`, color: 'text-rose-400' },
+                          { label: 'Depth', value: `${eq.coordinates[2]} km`, color: 'text-white' },
+                          { label: 'Tsunami Watch', value: eq.tsunami === 1 ? 'YES' : 'NO', color: 'text-[#00ff41]' },
+                        ],
+                        description: `Earthquake registered at ${eq.place}. Depth: ${eq.coordinates[2]}km.`,
+                        deskId: 'geospatial',
+                        deskLabel: 'Geospatial Desk',
+                        rawItem: eq,
+                      });
+                    }}
+                    className="cursor-pointer"
+                  />
+                );
+              })}
+
+            {/* 3D User Location */}
+            {layers.userFocal && userLocation && (() => {
+              const uProj = project3D(
+                userLocation.lng,
+                userLocation.lat,
+                globeRotation[0],
+                globeRotation[1],
+                190,
+                500,
+                250
+              );
+              if (!uProj.visible) return null;
+
+              return (
+                <g>
+                  <circle cx={uProj.x} cy={uProj.y} r="10" fill="rgba(0, 255, 65, 0.4)" className="animate-ping" />
+                  <circle cx={uProj.x} cy={uProj.y} r="5" fill="#00ff41" stroke="#ffffff" strokeWidth="1.5" />
+                  <text
+                    x={uProj.x + 8}
+                    y={uProj.y + 3}
+                    fill="#00ff41"
+                    fontSize="10"
+                    fontFamily="monospace"
+                    fontWeight="bold"
+                  >
+                    YOU
+                  </text>
+                </g>
+              );
+            })()}
+          </svg>
+        )}
+
+        {/* HUD Quick Jump Targets & Target Search Strip */}
+        <div className="absolute bottom-2 left-3 right-3 flex flex-wrap items-center justify-between gap-2 pointer-events-none">
+          <div className="flex flex-wrap gap-1.5 pointer-events-auto font-mono text-[10px]">
+            <span className="px-2 py-1 rounded bg-[#070d18]/90 border border-[#162338] text-[#55718a] uppercase font-bold">
+              🎯 Tactical Jump:
+            </span>
+            {[
+              { name: 'Bab-el-Mandeb', lat: 12.8, lng: 43.4 },
+              { name: 'Strait of Hormuz', lat: 26.5, lng: 56.2 },
+              { name: 'Taiwan Strait', lat: 24.1, lng: 119.8 },
+              { name: 'Malacca Strait', lat: 2.2, lng: 102.1 },
+              { name: 'Suwałki Gap', lat: 54.2, lng: 23.3 },
+              { name: 'Panama Canal', lat: 9.1, lng: -79.7 },
+            ].map((tgt) => (
+              <button
+                key={tgt.name}
+                type="button"
+                onClick={() => handleJumpToCoord(tgt.lat, tgt.lng)}
+                className="px-2 py-1 rounded bg-[#070d18]/90 hover:bg-[#102a45] border border-[#162338] hover:border-[#00d1ff] text-[#d4d4d4] hover:text-[#00d1ff] transition-colors"
+              >
+                {tgt.name}
+              </button>
+            ))}
+          </div>
+
+          <div className="pointer-events-auto">
+            <button
+              type="button"
+              onClick={onOpenWhatsAppModal}
+              className="px-3 py-1.5 rounded-lg bg-[#25D366] hover:bg-[#20bd5a] text-black font-mono font-bold text-xs flex items-center gap-1.5 shadow-lg shadow-[#25D366]/30 transition-all"
+            >
+              <Send className="w-3.5 h-3.5" />
+              <span>Configure WhatsApp Alert Hub</span>
+            </button>
+          </div>
+        </div>
       </div>
 
-      {/* FOOTER METRICS & LEGEND BAR */}
-      <div className="flex flex-wrap items-center justify-between gap-3 pt-1 text-[11px] font-mono text-[#737373] border-t border-[#141414]">
-        <div className="flex flex-wrap items-center gap-3">
-          <span className="flex items-center gap-1 text-[#00d1ff]">
-            <Ship className="w-3 h-3" /> Vessel Tracking
-          </span>
-          <span className="flex items-center gap-1 text-amber-300">
-            <Plane className="w-3 h-3" /> ADS-B Flights
-          </span>
-          <span className="flex items-center gap-1 text-rose-400">
-            <Anchor className="w-3 h-3" /> Chokepoints
-          </span>
-          <span className="flex items-center gap-1 text-purple-400">
-            <Radio className="w-3 h-3" /> GPS Jamming
-          </span>
-          <span className="flex items-center gap-1 text-sky-400">
-            <Sparkles className="w-3 h-3" /> X/Twitter Disaster Beacons
-          </span>
-          <span className="flex items-center gap-1 text-rose-500">
-            ● Quakes
-          </span>
-          <span className="flex items-center gap-1 text-orange-400">
-            ▲ Thermal Fires
-          </span>
-        </div>
-
-        <div className="text-[#555555]">
-          CLICK ANY VESSEL, FLIGHT OR CHOKEPOINT FOR FULL TELEMETRY
-        </div>
-      </div>
+      {/* Selected Entity Inspector Modal / HUD Card */}
+      <EntityDetailCard
+        entity={selectedEntity}
+        onClose={() => setSelectedEntity(null)}
+        userLocation={userLocation}
+        onNavigateToDesk={onNavigateToDesk}
+        onOpenWhatsAppModal={onOpenWhatsAppModal}
+      />
     </div>
   );
 };

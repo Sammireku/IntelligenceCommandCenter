@@ -64,6 +64,10 @@ export const SynthesisPanel: React.FC<SynthesisPanelProps> = ({
     }
   };
 
+  const keyFindings = synthesis.keyFindings || [];
+  const crossDomainCorrelations = synthesis.crossDomainCorrelations || [];
+  const tradeAndHedgeHypotheses = synthesis.tradeAndHedgeHypotheses || [];
+
   return (
     <div id="synthesis-panel" className="bg-[#0a0a0a] border border-[#1a1a1a] rounded-lg p-4 font-sans flex flex-col gap-4 shadow-xl">
       {/* Header */}
@@ -74,9 +78,9 @@ export const SynthesisPanel: React.FC<SynthesisPanelProps> = ({
           </div>
           <div>
             <h2 className="text-sm font-mono font-bold uppercase tracking-wider text-white flex items-center gap-2">
-              MIZ AI CROSS-DOMAIN SYNTHESIS
-              <span className={`px-2 py-0.2 rounded text-[10px] font-mono uppercase font-bold border ${getThreatColor(synthesis.threatLevel)}`}>
-                THREAT: {synthesis.threatLevel}
+              CRUCIX AI CROSS-DOMAIN SYNTHESIS
+              <span className={`px-2 py-0.2 rounded text-[10px] font-mono uppercase font-bold border ${getThreatColor(synthesis.threatLevel || 'LOW')}`}>
+                THREAT: {synthesis.threatLevel || 'LOW'}
               </span>
             </h2>
             <div className="text-[11px] font-mono text-[#888888]">
@@ -115,7 +119,7 @@ export const SynthesisPanel: React.FC<SynthesisPanelProps> = ({
           <span>Key Strategic Findings</span>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2 font-sans text-xs">
-          {synthesis.keyFindings.map((finding, idx) => (
+          {keyFindings.map((finding, idx) => (
             <div
               key={idx}
               className="p-2.5 rounded bg-[#050505] border border-[#1a1a1a] text-[#d4d4d4] flex items-start gap-2 leading-relaxed"
@@ -128,7 +132,7 @@ export const SynthesisPanel: React.FC<SynthesisPanelProps> = ({
       </div>
 
       {/* Cross-Domain Correlations */}
-      {synthesis.crossDomainCorrelations.length > 0 && (
+      {crossDomainCorrelations.length > 0 && (
         <div className="space-y-2 pt-2 border-t border-[#1a1a1a]">
           <div className="text-xs font-mono font-bold uppercase text-[#888888] flex items-center gap-1.5">
             <Network className="w-3.5 h-3.5 text-[#00d1ff]" />
@@ -136,14 +140,14 @@ export const SynthesisPanel: React.FC<SynthesisPanelProps> = ({
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
-            {synthesis.crossDomainCorrelations.map((corr, idx) => (
+            {crossDomainCorrelations.map((corr, idx) => (
               <div
                 key={idx}
                 className="p-3 rounded bg-[#050505] border border-[#1a1a1a] space-y-2 flex flex-col justify-between"
               >
                 <div>
                   <div className="flex flex-wrap items-center gap-1 mb-1.5">
-                    {corr.domains.map((dom) => (
+                    {(corr.domains || []).map((dom) => (
                       <span
                         key={dom}
                         className="px-1.5 py-0.5 rounded bg-[#121212] text-[#00d1ff] text-[10px] font-mono border border-[#262626]"
@@ -166,7 +170,7 @@ export const SynthesisPanel: React.FC<SynthesisPanelProps> = ({
       )}
 
       {/* Actionable Trade & Risk Hypotheses */}
-      {synthesis.tradeAndHedgeHypotheses.length > 0 && (
+      {tradeAndHedgeHypotheses.length > 0 && (
         <div className="space-y-2 pt-2 border-t border-[#1a1a1a]">
           <div className="text-xs font-mono font-bold uppercase text-[#888888] flex items-center gap-1.5">
             <TrendingUp className="w-3.5 h-3.5 text-[#00ff41]" />
@@ -174,7 +178,7 @@ export const SynthesisPanel: React.FC<SynthesisPanelProps> = ({
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
-            {synthesis.tradeAndHedgeHypotheses.map((h, idx) => (
+            {tradeAndHedgeHypotheses.map((h, idx) => (
               <div
                 key={idx}
                 className="p-3 rounded bg-[#050505] border border-[#1a1a1a] space-y-2 flex flex-col justify-between"

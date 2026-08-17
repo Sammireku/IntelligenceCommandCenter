@@ -1,1 +1,4 @@
-{"name":"Miz Intelligence Center","description":"Real-time personal intelligence dashboard with parallel sweep engine, delta calculation, multi-tier anomaly detection, and AI cross-domain synthesis.","requestFramePermissions":[],"majorCapabilities":["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]}
+{"name":"Miz Intelligence Center",
+  "description": "Real-time personal intelligence dashboard with top satellite vector GIS map, 12-hour AI crisis sitrep, WhatsApp proximity alert dispatch, WebSDR radio spectrum receiver, and cross-domain anomaly detection.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"] }

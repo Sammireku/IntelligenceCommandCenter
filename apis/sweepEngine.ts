@@ -58,7 +58,7 @@ export function subscribeSSE(res: Response): () => void {
 
   // Send initial connected event + latest sweep
   sendSseToClient(res, 'connected', {
-    message: 'Miz SSE telemetry stream established',
+    message: 'Crucix SSE telemetry stream established',
     activeClients: sseClients.size,
     nextSweepTimestamp,
     sweepIntervalMinutes,
@@ -133,16 +133,28 @@ export async function performSweep(manualTrigger = false): Promise<SweepPayload>
     const firmsData = firmsRes.status === 'fulfilled' ? firmsRes.value : null;
     const twitterData = twitterRes.status === 'fulfilled' ? twitterRes.value : null;
 
+    const earthquakesData = usgsData?.data || { totalCount: 0, maxMag: 0, maxMagnitude: 0, significantCount: 0, items: [] };
+    const thermalAnomaliesData = firmsData?.data || { totalHotspots: 0, highConfidenceCount: 0, items: [] };
+    const twitterDisasterData = twitterData?.data || { totalActiveDispatches: 0, criticalCount: 0, sourcesMonitored: 14, items: [] };
+
     const geospatialTelemetry: ModuleTelemetry<GeospatialModuleData> = {
       status: usgsData?.status === 'ok' && noaaData?.status === 'ok' ? 'ok' : 'degraded',
       latencyMs: Math.max(usgsData?.latencyMs || 0, noaaData?.latencyMs || 0, weatherData?.latencyMs || 0),
       lastUpdated: new Date().toISOString(),
       sourceEndpoint: 'USGS GeoJSON + NOAA SWPC + OpenMeteo + NASA FIRMS + Twitter/X OSINT',
       data: {
-        earthquakes: usgsData?.data || { totalCount: 0, maxMag: 0, significantCount: 0, items: [] },
+        earthquakes: {
+          ...earthquakesData,
+          maxMagnitude: earthquakesData.maxMag || (earthquakesData as any).maxMagnitude || 0,
+        },
         spaceWeather: noaaData?.data || {
           kpCurrent: 2.0,
           kpEstimated24hMax: 3.0,
+          kpIndex: 2.1,
+          geomagneticStormRisk: 'Quiet',
+          solarWindSpeedKmS: 412,
+          solarWindDensityPcm3: 5.4,
+          solarFlareThreat: 'Low (C-Class)',
           stormLevel: 'None',
           radioBlackoutRisk: 'Low',
           solarRadiationRisk: 'Quiet',
@@ -150,8 +162,9 @@ export async function performSweep(manualTrigger = false): Promise<SweepPayload>
           recentKpValues: [],
         },
         weatherHubs: weatherData?.data || [],
-        thermalAnomalies: firmsData?.data || { totalHotspots: 0, highConfidenceCount: 0, items: [] },
-        disasterFeed: twitterData?.data || { totalActiveDispatches: 0, criticalCount: 0, items: [] },
+        thermalAnomalies: thermalAnomaliesData,
+        fireAnomalies: thermalAnomaliesData.items || [],
+        disasterFeed: twitterDisasterData,
       },
       error: usgsData?.error || noaaData?.error,
     };
