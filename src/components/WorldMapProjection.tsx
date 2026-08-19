@@ -1036,7 +1036,7 @@ export const WorldMapProjection: React.FC<WorldMapProjectionProps> = ({
             </defs>
 
             {/* Deep Ocean Basin (Base) */}
-            <rect width="1000" height="500" fill="url(#ocean-bathymetry)" />
+            <rect width="1000" height="500" fill="url(#ocean-bathymetry)" opacity="0.48" />
 
             {/* Premium Satellite Photorealistic World Map Backdrop */}
             <image
@@ -1046,7 +1046,7 @@ export const WorldMapProjection: React.FC<WorldMapProjectionProps> = ({
               width="1000"
               height="500"
               preserveAspectRatio="none"
-              opacity="0.48"
+              opacity="1.0"
             />
 
             {/* Active Real-Time Sweep Feedback Radar Beam */}
