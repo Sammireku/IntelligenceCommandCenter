@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { motion } from 'motion/react';
 import {
   Activity,
   AlertOctagon,
@@ -24,6 +25,7 @@ import { WhatsAppAlertModal } from './components/WhatsAppAlertModal.js';
 import { WebSdrRadioModal } from './components/WebSdrRadioModal.js';
 import { AssetWatchlistModal } from './components/AssetWatchlistModal.js';
 import { MetadataSandboxModal } from './components/MetadataSandboxModal.js';
+import { VoiceCommander } from './components/VoiceCommander.js';
 import { SweepPayload, UserLocation, WhatsAppAlertConfig } from './types.js';
 import { playFlashAlertChime, playSweepCompleteChime, playTacticalBlip } from './utils/audio.js';
 
@@ -328,6 +330,8 @@ export function App() {
           collapsed={sidebarCollapsed}
           onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
           liteMode={liteMode}
+          userLocation={userLocation}
+          sweep={sweep}
         />
 
         {/* Primary Command Canvas */}
@@ -340,7 +344,7 @@ export function App() {
               </div>
               <div className="space-y-1">
                 <h2 className="text-base font-bold text-white uppercase tracking-widest">
-                  CRUCIX INTELLIGENCE SWEEP ENGINE
+                  MILZ SENTRY INTELLIGENCE SWEEP ENGINE
                 </h2>
                 <p className="text-xs text-[#888888] max-w-md">
                   Initializing parallel workers across USGS, NOAA, CoinGecko, Europe PMC, CISA KEV, and OpenSky...
@@ -352,25 +356,39 @@ export function App() {
               {/* ========================================================================= */}
               {/* 12-HOUR CRISIS AI SYNTHESIS & TEMPORAL SITREP                            */}
               {/* ========================================================================= */}
-              <AiSummary12Hour
-                earthquakes={sweep?.geospatial?.data?.earthquakes?.items || []}
-                disasters={sweep?.geospatial?.data?.disasterFeed?.items || []}
-                emergencySquawks={sweep?.infrastructure?.data?.airTraffic?.emergencySquawks || []}
-                fireAnomalies={sweep?.geospatial?.data?.fireAnomalies || sweep?.geospatial?.data?.thermalAnomalies?.items || []}
-                trackedVessels={sweep?.infrastructure?.data?.maritime?.trackedVessels || []}
-                onOpenDesk={handleNavigateToDesk}
-                liteMode={liteMode}
-              />
+              <motion.div
+                key={`summary-${sweep.timestamp}`}
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.45, ease: 'easeOut' }}
+              >
+                <AiSummary12Hour
+                  earthquakes={sweep?.geospatial?.data?.earthquakes?.items || []}
+                  disasters={sweep?.geospatial?.data?.disasterFeed?.items || []}
+                  emergencySquawks={sweep?.infrastructure?.data?.airTraffic?.emergencySquawks || []}
+                  fireAnomalies={sweep?.geospatial?.data?.fireAnomalies || sweep?.geospatial?.data?.thermalAnomalies?.items || []}
+                  trackedVessels={sweep?.infrastructure?.data?.maritime?.trackedVessels || []}
+                  onOpenDesk={handleNavigateToDesk}
+                  liteMode={liteMode}
+                />
+              </motion.div>
 
               {/* ========================================================================= */}
               {/* CROSS-DOMAIN AI SYNTHESIS BRIEFING                                       */}
               {/* ========================================================================= */}
-              <SynthesisPanel
-                synthesis={sweep?.synthesis}
-                onResynthesize={handleResynthesize}
-                isSynthesizing={isSynthesizing}
-                liteMode={liteMode}
-              />
+              <motion.div
+                key={`synthesis-${sweep.timestamp}`}
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.45, ease: 'easeOut', delay: 0.08 }}
+              >
+                <SynthesisPanel
+                  synthesis={sweep?.synthesis}
+                  onResynthesize={handleResynthesize}
+                  isSynthesizing={isSynthesizing}
+                  liteMode={liteMode}
+                />
+              </motion.div>
 
               {/* ========================================================================= */}
               {/* PRIMARY 2x2 DOMAIN INTELLIGENCE DESKS MATRIX                             */}
@@ -378,42 +396,70 @@ export function App() {
               <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
                 {/* 1. Geospatial & Hazards Desk */}
                 {sweep?.geospatial && (
-                  <GeospatialPanel
-                    telemetry={sweep.geospatial}
-                    infrastructureTelemetry={sweep.infrastructure}
-                    liteMode={liteMode}
-                  />
+                  <motion.div
+                    key={`geospatial-${sweep.timestamp}`}
+                    initial={{ opacity: 0, y: 15 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.5, ease: 'easeOut', delay: 0.14 }}
+                  >
+                    <GeospatialPanel
+                      telemetry={sweep.geospatial}
+                      infrastructureTelemetry={sweep.infrastructure}
+                      liteMode={liteMode}
+                    />
+                  </motion.div>
                 )}
 
                 {/* 2. Infrastructure, Maritime, Air Traffic & Cyber Desk */}
                 {sweep?.infrastructure && (
-                  <InfrastructurePanel
-                    telemetry={sweep.infrastructure}
-                    liteMode={liteMode}
-                  />
+                  <motion.div
+                    key={`infra-${sweep.timestamp}`}
+                    initial={{ opacity: 0, y: 15 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.5, ease: 'easeOut', delay: 0.18 }}
+                  >
+                    <InfrastructurePanel
+                      telemetry={sweep.infrastructure}
+                      liteMode={liteMode}
+                    />
+                  </motion.div>
                 )}
 
                 {/* 3. Markets, Macro & Sanctions Desk */}
                 {sweep?.markets && (
-                  <MarketsPanel
-                    telemetry={sweep.markets}
-                    liteMode={liteMode}
-                  />
+                  <motion.div
+                    key={`markets-${sweep.timestamp}`}
+                    initial={{ opacity: 0, y: 15 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.5, ease: 'easeOut', delay: 0.22 }}
+                  >
+                    <MarketsPanel
+                      telemetry={sweep.markets}
+                      liteMode={liteMode}
+                    />
+                  </motion.div>
                 )}
 
                 {/* 4. Public Health & Bio-Research Desk */}
                 {sweep?.health && (
-                  <HealthPanel
-                    telemetry={sweep.health}
-                    liteMode={liteMode}
-                  />
+                  <motion.div
+                    key={`health-${sweep.timestamp}`}
+                    initial={{ opacity: 0, y: 15 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.5, ease: 'easeOut', delay: 0.26 }}
+                  >
+                    <HealthPanel
+                      telemetry={sweep.health}
+                      liteMode={liteMode}
+                    />
+                  </motion.div>
                 )}
               </div>
 
               {/* Footer System Telemetry */}
               <footer className="pt-4 pb-6 border-t border-[#1a1a1a] flex flex-wrap items-center justify-between gap-3 text-[11px] font-mono text-[#737373]">
                 <div className="flex items-center gap-3">
-                  <span className="text-[#00ff41] font-bold">CRUCIX OSINT NODE v3.5</span>
+                  <span className="text-[#00ff41] font-bold">MILZ SENTRY OSINT NODE v3.5</span>
                   <span>•</span>
                   <span>Photorealistic Earth Vector Projection</span>
                   <span>•</span>
@@ -474,6 +520,15 @@ export function App() {
           setSweep(historicalSweep);
           playTacticalBlip(1200);
         }}
+      />
+
+      {/* Floating Tactical Voice Commander Console */}
+      <VoiceCommander
+        onTriggerSweep={handleTriggerSweep}
+        onResynthesize={handleResynthesize}
+        onOpenWhatsApp={() => setWhatsAppModalOpen(true)}
+        onOpenHistory={() => setHistoryOpen(true)}
+        onOpenWatchlist={() => setWatchlistModalOpen(true)}
       />
     </div>
   );

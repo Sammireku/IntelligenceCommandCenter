@@ -78,7 +78,7 @@ export const SynthesisPanel: React.FC<SynthesisPanelProps> = ({
           </div>
           <div>
             <h2 className="text-sm font-mono font-bold uppercase tracking-wider text-white flex items-center gap-2">
-              CRUCIX AI CROSS-DOMAIN SYNTHESIS
+              MILZ SENTRY AI CROSS-DOMAIN SYNTHESIS
               <span className={`px-2 py-0.2 rounded text-[10px] font-mono uppercase font-bold border ${getThreatColor(synthesis.threatLevel || 'LOW')}`}>
                 THREAT: {synthesis.threatLevel || 'LOW'}
               </span>

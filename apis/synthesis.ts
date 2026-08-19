@@ -69,7 +69,7 @@ export async function generateCrossDomainSynthesis(
         },
       };
 
-      const prompt = `You are the Miz Personal Intelligence Synthesizer. Analyze this real-time OSINT sweep snapshot across 5 domains (Geospatial/SpaceWeather, Financial Markets/Macro, Biomedical Breakthroughs & Phytomedicine, Maritime Chokepoints / Dark Fleet AIS, Cyber & Airspace/GPS Jamming) and produce an executive intelligence synthesis.
+      const prompt = `You are the MILZ Sentry Personal Intelligence Synthesizer. Analyze this real-time OSINT sweep snapshot across 5 domains (Geospatial/SpaceWeather, Financial Markets/Macro, Biomedical Breakthroughs & Phytomedicine, Maritime Chokepoints / Dark Fleet AIS, Cyber & Airspace/GPS Jamming) and produce an executive intelligence synthesis.
 
 SWEEP DATA SNAPSHOT:
 ${JSON.stringify(summaryContext, null, 2)}

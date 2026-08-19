@@ -21,7 +21,12 @@ import {
   Zap,
 } from 'lucide-react';
 import { getAudioMuted, playTacticalBlip, setAudioMuted } from '../utils/audio.js';
-import { exportSweepAsJson, exportSweepAsMarkdown } from '../utils/export.js';
+import {
+  exportSweepAsJson,
+  exportSweepAsMarkdown,
+  exportSweepAsPdf,
+  exportSweepAsCsvByCategory,
+} from '../utils/export.js';
 import { SweepPayload } from '../types.js';
 
 interface HeaderProps {
@@ -101,7 +106,7 @@ export const Header: React.FC<HeaderProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-xs md:text-sm font-bold font-mono tracking-wider text-white uppercase">
-                CRUCIX // COMMAND NODE
+                MILZ SENTRY // COMMAND NODE
               </h1>
               <span
                 className={`px-1.5 py-0.2 text-[9px] font-mono font-bold tracking-widest rounded border ${
@@ -358,6 +363,81 @@ export const Header: React.FC<HeaderProps> = ({
                 >
                   <Download className="w-3.5 h-3.5 text-[#00ff41]" />
                   <span>Raw Sweep JSON (.json)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    exportSweepAsPdf(sweep);
+                    setShowExportMenu(false);
+                  }}
+                  className="w-full text-left px-2 py-2 rounded text-xs text-[#d4d4d4] hover:bg-[#1a1a1a] hover:text-[#00ff41] transition-colors flex items-center gap-2"
+                >
+                  <FileText className="w-3.5 h-3.5 text-rose-400" />
+                  <span>Tactical PDF Sitrep (.pdf)</span>
+                </button>
+                <div className="border-t border-[#1f1f1f] my-1"></div>
+                <div className="px-2 py-1 text-[9px] text-[#55718a] uppercase font-bold">
+                  CSV Data Export
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    exportSweepAsCsvByCategory(sweep, 'all');
+                    setShowExportMenu(false);
+                  }}
+                  className="w-full text-left px-2 py-1 rounded text-[11px] text-[#a0a0a0] hover:bg-[#1a1a1a] hover:text-[#00ff41] transition-colors flex items-center gap-2 pl-3"
+                >
+                  <span>• All Combined Fields</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    exportSweepAsCsvByCategory(sweep, 'alerts');
+                    setShowExportMenu(false);
+                  }}
+                  className="w-full text-left px-2 py-1 rounded text-[11px] text-[#a0a0a0] hover:bg-[#1a1a1a] hover:text-[#00ff41] transition-colors flex items-center gap-2 pl-3"
+                >
+                  <span>• Active Alerts Only</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    exportSweepAsCsvByCategory(sweep, 'geospatial');
+                    setShowExportMenu(false);
+                  }}
+                  className="w-full text-left px-2 py-1 rounded text-[11px] text-[#a0a0a0] hover:bg-[#1a1a1a] hover:text-[#00ff41] transition-colors flex items-center gap-2 pl-3"
+                >
+                  <span>• Geospatial Hazards</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    exportSweepAsCsvByCategory(sweep, 'markets');
+                    setShowExportMenu(false);
+                  }}
+                  className="w-full text-left px-2 py-1 rounded text-[11px] text-[#a0a0a0] hover:bg-[#1a1a1a] hover:text-[#00ff41] transition-colors flex items-center gap-2 pl-3"
+                >
+                  <span>• Markets & Liquidity</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    exportSweepAsCsvByCategory(sweep, 'infrastructure');
+                    setShowExportMenu(false);
+                  }}
+                  className="w-full text-left px-2 py-1 rounded text-[11px] text-[#a0a0a0] hover:bg-[#1a1a1a] hover:text-[#00ff41] transition-colors flex items-center gap-2 pl-3"
+                >
+                  <span>• Cyber & Infra</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    exportSweepAsCsvByCategory(sweep, 'health');
+                    setShowExportMenu(false);
+                  }}
+                  className="w-full text-left px-2 py-1 rounded text-[11px] text-[#a0a0a0] hover:bg-[#1a1a1a] hover:text-[#00ff41] transition-colors flex items-center gap-2 pl-3"
+                >
+                  <span>• Bio-Research & Health</span>
                 </button>
               </div>
             )}

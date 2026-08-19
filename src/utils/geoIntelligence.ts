@@ -330,7 +330,7 @@ export function generateWhatsAppAlertUrl(
     : null;
 
   const nowStr = new Date().toUTCString();
-  const text = `🚨 *CRUCIX CRISIS ALERT* 🚨
+  const text = `🚨 *MILZ SENTRY CRISIS ALERT* 🚨
 ------------------------------------
 📍 *Event:* ${entity.name}
 🏷 *Category:* ${entity.category.toUpperCase()}
@@ -340,8 +340,8 @@ ${distance !== null ? `📏 *Distance to you:* ${distance} km (${(distance * 0.5
 🕒 *Time:* ${nowStr}
 📝 *Sitrep:* ${entity.details || 'Active incident registered on global monitoring feeds.'}
 ------------------------------------
-🔗 *Live OSINT Desk:* https://crucix-node.network/map?lat=${entity.lat}&lng=${entity.lng}
-_Dispatched via Crucix Personal Intelligence Node_`;
+🔗 *Live OSINT Desk:* https://milz-sentry.network/map?lat=${entity.lat}&lng=${entity.lng}
+_Dispatched via MILZ Sentry Personal Intelligence Node_`;
 
   const encoded = encodeURIComponent(text);
   const cleanPhone = phoneNumber.replace(/[^0-9]/g, '');
@@ -416,4 +416,81 @@ export function generate12HourSitrep(
       'Airspace emergency squawks (7700) resolved with zero commercial hull losses in the current sweep interval.',
     ],
   };
+}
+
+export function getAlertCoordinates(
+  alert: any,
+  sweep: any
+): { lat: number; lng: number } | null {
+  if (alert.id.startsWith('alert-eq-')) {
+    const eqId = alert.id.replace('alert-eq-', '');
+    const eq = sweep?.geospatial?.data?.earthquakes?.items?.find((e: any) => e.id === eqId);
+    if (eq) return { lat: eq.coordinates[1], lng: eq.coordinates[0] };
+  }
+  if (alert.id.startsWith('alert-tw-')) {
+    const twId = alert.id.replace('alert-tw-', '');
+    const tw = sweep?.geospatial?.data?.disasterFeed?.items?.find((t: any) => t.id === twId);
+    if (tw) return { lat: tw.location.lat, lng: tw.location.lng };
+  }
+  if (alert.metrics) {
+    const lat = alert.metrics.Latitude || alert.metrics.lat || alert.metrics.LAT;
+    const lng = alert.metrics.Longitude || alert.metrics.lng || alert.metrics.LNG;
+    if (lat !== undefined && lng !== undefined) {
+      return { lat: Number(lat), lng: Number(lng) };
+    }
+  }
+
+  // Fallbacks for known geopolitical hotspot names
+  const titleLower = alert.title.toLowerCase();
+  const summaryLower = alert.summary.toLowerCase();
+  if (titleLower.includes('bab-el-mandeb') || summaryLower.includes('bab-el-mandeb') || titleLower.includes('red sea') || summaryLower.includes('red sea')) {
+    return { lat: 12.8, lng: 43.4 };
+  }
+  if (titleLower.includes('taiwan') || summaryLower.includes('taiwan')) {
+    return { lat: 23.6978, lng: 120.9605 };
+  }
+  if (titleLower.includes('dnipro') || summaryLower.includes('dnipro') || titleLower.includes('ukraine') || summaryLower.includes('ukraine')) {
+    return { lat: 48.4647, lng: 35.0462 };
+  }
+  if (titleLower.includes('panama') || summaryLower.includes('panama')) {
+    return { lat: 8.9833, lng: -79.5167 };
+  }
+  if (titleLower.includes('strait of hormuz') || summaryLower.includes('hormuz')) {
+    return { lat: 26.5667, lng: 56.2500 };
+  }
+  if (titleLower.includes('malacca') || summaryLower.includes('malacca')) {
+    return { lat: 2.2, lng: 102.1 };
+  }
+  if (titleLower.includes('suwałki') || summaryLower.includes('suwalki')) {
+    return { lat: 54.2, lng: 23.3 };
+  }
+  
+  return null;
+}
+
+export function sortAlertsByProximity(
+  alerts: any[],
+  userLocation: any | null,
+  sweep: any | null
+): { alert: any; distanceKm: number | null }[] {
+  if (!userLocation || !sweep) {
+    return alerts.map(a => ({ alert: a, distanceKm: null }));
+  }
+
+  return alerts.map(alert => {
+    const coords = getAlertCoordinates(alert, sweep);
+    if (coords) {
+      const dist = calculateDistanceKm(userLocation.lat, userLocation.lng, coords.lat, coords.lng);
+      return { alert, distanceKm: dist };
+    }
+    return { alert, distanceKm: null };
+  }).sort((a, b) => {
+    if (a.distanceKm !== null && b.distanceKm !== null) {
+      return a.distanceKm - b.distanceKm;
+    }
+    if (a.distanceKm !== null) return -1;
+    if (b.distanceKm !== null) return 1;
+    
+    return new Date(b.alert.timestamp).getTime() - new Date(a.alert.timestamp).getTime();
+  });
 }

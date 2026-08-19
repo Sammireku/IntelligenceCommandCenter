@@ -40,7 +40,7 @@ async function startServer() {
     const config = getSweepConfig();
     res.json({
       status: 'ok',
-      engine: 'Miz Intelligence Sweep Node',
+      engine: 'Crucix Intelligence Sweep Node',
       timestamp: new Date().toISOString(),
       config,
     });
@@ -130,10 +130,10 @@ async function startServer() {
   initSweepScheduler();
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`[Miz] Intelligence Command Server running on http://0.0.0.0:${PORT}`);
+    console.log(`[Crucix] Intelligence Command Server running on http://0.0.0.0:${PORT}`);
   });
 }
 
 startServer().catch((err) => {
-  console.error('[Miz] Fatal server startup error:', err);
+  console.error('[Crucix] Fatal server startup error:', err);
 });

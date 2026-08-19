@@ -334,7 +334,7 @@ export function calculateSweepDelta(
     id: `alert-routine-${Date.now()}`,
     tier: 'ROUTINE',
     domain: 'synthesis',
-    title: `🔵 ROUTINE: Miz Parallel Sweep Completed`,
+    title: `🔵 ROUTINE: MILZ Sentry Parallel Sweep Completed`,
     summary: `Synchronized telemetry across USGS, NOAA SWPC, OpenMeteo, CoinGecko, Macro, Europe PMC, Medical Discoveries, Alternative Medicine RCTs, Maritime AIS, and OpenSky feeds.`,
     timestamp: nowIso,
     metrics: { 'Sweep Duration': `${current.sweepDurationMs}ms` },

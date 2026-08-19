@@ -20,7 +20,7 @@ export async function fetchUsgsEarthquakes(): Promise<{
 
       const response = await fetch(url, {
         signal: controller.signal,
-        headers: { 'Accept': 'application/json', 'User-Agent': 'Miz-Intelligence-Sweep/1.0' },
+        headers: { 'Accept': 'application/json', 'User-Agent': 'Crucix-Intelligence-Sweep/1.0' },
       });
       clearTimeout(timeoutId);
 

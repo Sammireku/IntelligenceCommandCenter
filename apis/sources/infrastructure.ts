@@ -29,7 +29,7 @@ export async function fetchInfrastructureData(): Promise<{
 
     const cisaRes = await fetch(cisaUrl, {
       signal: controller.signal,
-      headers: { 'Accept': 'application/json', 'User-Agent': 'Miz-Cyber-Watch/1.0' },
+      headers: { 'Accept': 'application/json', 'User-Agent': 'Crucix-Cyber-Watch/1.0' },
     });
     clearTimeout(timeoutId);
 

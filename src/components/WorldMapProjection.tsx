@@ -443,7 +443,7 @@ export const WorldMapProjection: React.FC<WorldMapProjectionProps> = ({
   useEffect(() => {
     let animFrame: number;
     const animate = () => {
-      setRadarSweepAngle((prev) => (prev + 1.0) % 360);
+      setRadarSweepAngle((prev) => (prev + 1.2) % 360);
       if (autoRotate && viewMode === '3d') {
         setGlobeRotation(([lng, lat]) => [(lng + 0.3) % 360, lat]);
       }
@@ -453,6 +453,25 @@ export const WorldMapProjection: React.FC<WorldMapProjectionProps> = ({
     return () => cancelAnimationFrame(animFrame);
   }, [autoRotate, viewMode]);
 
+  // Listen to custom map events (e.g. from voice command system or GPS updater)
+  useEffect(() => {
+    const handleMapCommand = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (!detail) return;
+      if (detail.action === 'zoom-in') {
+        handleZoomIn();
+      } else if (detail.action === 'zoom-out') {
+        handleZoomOut();
+      } else if (detail.action === 'reset-zoom') {
+        handleResetZoom();
+      } else if (detail.action === 'center') {
+        handleCenterOnUser();
+      }
+    };
+    window.addEventListener('map-command', handleMapCommand);
+    return () => window.removeEventListener('map-command', handleMapCommand);
+  }, [userLocation, zoomLevel, panOffset, viewMode]);
+
   // Center on user focal point
   const handleCenterOnUser = () => {
     playTacticalBlip(1600);
@@ -461,6 +480,40 @@ export const WorldMapProjection: React.FC<WorldMapProjectionProps> = ({
     } else {
       const [ux, uy] = project2D(userLocation.lng, userLocation.lat);
       setPanOffset([500 - ux * zoomLevel, 250 - uy * zoomLevel]);
+    }
+  };
+
+  // Ask location permission and link user location live
+  const handleGpsSync = () => {
+    if (navigator.geolocation) {
+      playTacticalBlip(1300);
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const { latitude, longitude, accuracy } = position.coords;
+          onUpdateUserLocation({
+            lat: latitude,
+            lng: longitude,
+            name: 'Live GPS Target',
+            isLiveGps: true,
+            accuracyMeters: accuracy,
+          });
+          playTacticalBlip(1650);
+          setTimeout(() => {
+            if (viewMode === '3d') {
+              setGlobeRotation([-longitude, latitude]);
+            } else {
+              const [ux, uy] = project2D(longitude, latitude);
+              setPanOffset([500 - ux * zoomLevel, 250 - uy * zoomLevel]);
+            }
+          }, 100);
+        },
+        (error) => {
+          console.warn('GPS Error:', error);
+          alert('GPS Authorization Failed: ' + error.message);
+        }
+      );
+    } else {
+      alert('Browser does not support GPS geolocation.');
     }
   };
 
@@ -572,6 +625,18 @@ export const WorldMapProjection: React.FC<WorldMapProjectionProps> = ({
             <Compass className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">🎯 Center on Me</span>
             <span className="sm:hidden">Me</span>
+          </button>
+
+          {/* GPS Geolocation Sync button */}
+          <button
+            type="button"
+            onClick={handleGpsSync}
+            className="px-2.5 py-1 rounded bg-[#00d1ff]/20 hover:bg-[#00d1ff]/30 border border-[#00d1ff]/60 text-[#00d1ff] font-bold flex items-center gap-1.5 text-xs transition-all shadow-sm"
+            title="Request live browser GPS permission & link location to You"
+          >
+            <span>🛰️</span>
+            <span className="hidden sm:inline">GPS Sync</span>
+            <span className="sm:hidden">GPS</span>
           </button>
 
           {/* 2D Satellite vs 3D Globe Toggle */}
@@ -826,7 +891,7 @@ export const WorldMapProjection: React.FC<WorldMapProjectionProps> = ({
         </button>
       </div>
 
-      {/* Primary Interactive Full-Width GIS Canvas */}
+       {/* Primary Interactive Full-Width GIS Canvas */}
       <div
         className="relative w-full h-[460px] md:h-[540px] lg:h-[580px] bg-[#02050b] cursor-crosshair overflow-hidden select-none"
         onMouseDown={handleMouseDown}
@@ -834,6 +899,36 @@ export const WorldMapProjection: React.FC<WorldMapProjectionProps> = ({
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
       >
+        {/* Floating Interactive Zoom Controls on Map (Granular Focus Panels) */}
+        <div className="absolute top-4 right-4 z-20 flex flex-col gap-1.5 pointer-events-auto bg-[#070d18]/90 border border-[#162338] p-1.5 rounded-lg shadow-xl backdrop-blur-md">
+          <button
+            type="button"
+            onClick={handleZoomIn}
+            className="w-8 h-8 flex items-center justify-center rounded bg-[#102a45]/80 hover:bg-[#1d4b7a] border border-[#1d4b7a] text-[#00ff41] font-bold text-lg transition-colors"
+            title="Zoom In"
+          >
+            +
+          </button>
+          <div className="text-[10px] text-center font-bold font-mono text-[#00d1ff]">
+            {zoomLevel.toFixed(1)}x
+          </div>
+          <button
+            type="button"
+            onClick={handleZoomOut}
+            className="w-8 h-8 flex items-center justify-center rounded bg-[#102a45]/80 hover:bg-[#1d4b7a] border border-[#1d4b7a] text-[#00ff41] font-bold text-lg transition-colors"
+            title="Zoom Out"
+          >
+            -
+          </button>
+          <button
+            type="button"
+            onClick={handleResetZoom}
+            className="px-1 py-0.5 mt-1 rounded bg-[#040811] hover:bg-[#162338] text-[9px] text-[#888888] hover:text-white border border-[#162338] transition-colors uppercase font-mono text-center"
+            title="Reset Map Focus"
+          >
+            Reset
+          </button>
+        </div>
         {/* ========================================================================= */}
         {/* 2D PHOTOREALISTIC SATELLITE VECTOR PROJECTION (1000 x 500 space)         */}
         {/* ========================================================================= */}
@@ -931,10 +1026,63 @@ export const WorldMapProjection: React.FC<WorldMapProjectionProps> = ({
                 <feGaussianBlur stdDeviation="2.5" result="blur" />
                 <feComposite in="SourceGraphic" in2="blur" operator="over" />
               </filter>
+
+              {/* Radar Sweep Arc Gradient */}
+              <linearGradient id="radar-sweep-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stopColor="rgba(0, 255, 65, 0.45)" />
+                <stop offset="50%" stopColor="rgba(0, 255, 65, 0.15)" />
+                <stop offset="100%" stopColor="rgba(0, 255, 65, 0)" />
+              </linearGradient>
             </defs>
 
-            {/* Deep Ocean Basin */}
+            {/* Deep Ocean Basin (Base) */}
             <rect width="1000" height="500" fill="url(#ocean-bathymetry)" />
+
+            {/* Premium Satellite Photorealistic World Map Backdrop */}
+            <image
+              href="https://stock.adobe.com/search?k=world+map+flat"
+              x="0"
+              y="0"
+              width="1000"
+              height="500"
+              preserveAspectRatio="none"
+              opacity="0.48"
+            />
+
+            {/* Active Real-Time Sweep Feedback Radar Beam */}
+            {(() => {
+              const rad = (radarSweepAngle * Math.PI) / 180;
+              const r = 700; // Sweep radius
+              const endX = 500 + Math.cos(rad) * r;
+              const endY = 250 + Math.sin(rad) * r;
+              
+              return (
+                <g opacity="0.32" pointerEvents="none">
+                  {/* Outer Radar Ping Ring */}
+                  <circle cx="500" cy="250" r="230" fill="none" stroke="#00ff41" strokeWidth="0.5" strokeDasharray="5 15" opacity="0.5" />
+                  <circle cx="500" cy="250" r="120" fill="none" stroke="#00ff41" strokeWidth="0.5" strokeDasharray="3 9" opacity="0.4" />
+                  
+                  {/* Glowing Sweep Line */}
+                  <line
+                    x1="500"
+                    y1="250"
+                    x2={endX}
+                    y2={endY}
+                    stroke="#00ff41"
+                    strokeWidth="1.5"
+                    filter="url(#city-glow)"
+                  />
+                  {/* Sweep Trail Cone */}
+                  <path
+                    d={`M 500,250 
+                       L ${endX.toFixed(1)},${endY.toFixed(1)} 
+                       A ${r},${r} 0 0,0 ${(500 + Math.cos(rad - 0.25) * r).toFixed(1)},${(250 + Math.sin(rad - 0.25) * r).toFixed(1)} 
+                       Z`}
+                    fill="url(#radar-sweep-gradient)"
+                  />
+                </g>
+              );
+            })()}
 
             {/* Bathymetric Oceanic Trenches & Continental Shelves */}
             <g opacity="0.6">
@@ -985,13 +1133,13 @@ export const WorldMapProjection: React.FC<WorldMapProjectionProps> = ({
 
               return (
                 <g key={land.name}>
-                  {/* Continental Shelf Turquoise Coastal Shallows */}
+                   {/* Continental Shelf Turquoise Coastal Shallows */}
                   <path
                     d={pathData}
                     fill="none"
                     stroke="#00b4d8"
                     strokeWidth="5"
-                    opacity="0.3"
+                    opacity="0.1"
                     filter="url(#coastal-glow)"
                   />
                   <path
@@ -999,17 +1147,18 @@ export const WorldMapProjection: React.FC<WorldMapProjectionProps> = ({
                     fill="none"
                     stroke="#175073"
                     strokeWidth="2"
-                    opacity="0.8"
+                    opacity="0.15"
                   />
-
-                  {/* Continent Surface with Biome Texturing */}
-                  <path
-                    d={pathData}
-                    fill={land.biomeGradient}
-                    stroke="#234a36"
-                    strokeWidth="0.85"
-                    className="transition-colors hover:brightness-110"
-                  />
+ 
+                   {/* Continent Surface with Biome Texturing */}
+                   <path
+                     d={pathData}
+                     fill={land.biomeGradient}
+                     stroke="#234a36"
+                     strokeWidth="0.85"
+                     className="transition-colors hover:brightness-110"
+                     opacity="0.22"
+                   />
 
                   {/* Topographic Mountain Ridges */}
                   {layers.topography && land.elevationRidge && (

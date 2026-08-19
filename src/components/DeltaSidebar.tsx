@@ -11,10 +11,12 @@ import {
   Radio,
   Search,
   ShieldAlert,
+  Star,
   TrendingUp,
   Zap,
 } from 'lucide-react';
-import { AlertItem, AlertTier, SweepDelta } from '../types.js';
+import { AlertItem, AlertTier, SweepDelta, UserLocation } from '../types.js';
+import { sortAlertsByProximity } from '../utils/geoIntelligence.js';
 
 interface DeltaSidebarProps {
   delta: SweepDelta | null;
@@ -22,6 +24,8 @@ interface DeltaSidebarProps {
   collapsed: boolean;
   onToggleCollapse: () => void;
   liteMode?: boolean;
+  userLocation?: UserLocation | null;
+  sweep?: any;
 }
 
 export const DeltaSidebar: React.FC<DeltaSidebarProps> = ({
@@ -30,13 +34,46 @@ export const DeltaSidebar: React.FC<DeltaSidebarProps> = ({
   collapsed,
   onToggleCollapse,
   liteMode = false,
+  userLocation = null,
+  sweep = null,
 }) => {
   const [selectedTier, setSelectedTier] = useState<'ALL' | AlertTier>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [expandedAlertId, setExpandedAlertId] = useState<string | null>(null);
+  
+  // Starred / follow-up alerts state
+  const [starredIds, setStarredIds] = useState<string[]>(() => {
+    const saved = localStorage.getItem('crucix_starred_alerts');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        return [];
+      }
+    }
+    return [];
+  });
+  const [filterStarredOnly, setFilterStarredOnly] = useState<boolean>(false);
+
+  const toggleStar = (e: React.MouseEvent, alertId: string) => {
+    e.stopPropagation();
+    let nextStarred: string[];
+    if (starredIds.includes(alertId)) {
+      nextStarred = starredIds.filter((id) => id !== alertId);
+    } else {
+      nextStarred = [...starredIds, alertId];
+    }
+    setStarredIds(nextStarred);
+    localStorage.setItem('crucix_starred_alerts', JSON.stringify(nextStarred));
+  };
 
   const alertItems = alerts || [];
-  const filteredAlerts = alertItems.filter((alert) => {
+
+  // Sort and match distance info if userLocation is active
+  const proximitySorted = sortAlertsByProximity(alertItems, userLocation, sweep);
+
+  const filteredAlerts = proximitySorted.filter(({ alert, distanceKm }) => {
+    if (filterStarredOnly && !starredIds.includes(alert.id)) return false;
     if (selectedTier !== 'ALL' && alert.tier !== selectedTier) return false;
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
@@ -204,6 +241,27 @@ export const DeltaSidebar: React.FC<DeltaSidebarProps> = ({
             </button>
           )}
         </div>
+
+        {/* Starred / Follow-up Filter Bar */}
+        <div className="flex items-center justify-between mt-2 pt-2 border-t border-[#1a1a1a] text-[10px] font-mono">
+          <button
+            type="button"
+            onClick={() => setFilterStarredOnly(!filterStarredOnly)}
+            className={`px-2 py-1 rounded flex items-center gap-1.5 transition-colors ${
+              filterStarredOnly
+                ? 'bg-amber-950/60 border border-amber-600 text-amber-300 font-bold'
+                : 'bg-[#121212] border border-[#1f1f1f] text-[#888888] hover:text-white'
+            }`}
+          >
+            <Star className={`w-3 h-3 ${filterStarredOnly ? 'fill-amber-400 text-amber-400' : ''}`} />
+            <span>Starred Follow-ups ({starredIds.length})</span>
+          </button>
+          {userLocation && (
+            <span className="text-[9px] text-[#55718a] uppercase font-bold flex items-center gap-1">
+              📍 Proximity Sorted
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Alerts Feed List */}
@@ -213,10 +271,11 @@ export const DeltaSidebar: React.FC<DeltaSidebarProps> = ({
             No alerts matching active filter.
           </div>
         ) : (
-          filteredAlerts.map((alert) => {
+          filteredAlerts.map(({ alert, distanceKm }) => {
             const isExpanded = expandedAlertId === alert.id;
             const isFlash = alert.tier === 'FLASH';
             const isPriority = alert.tier === 'PRIORITY';
+            const isStarred = starredIds.includes(alert.id);
 
             return (
               <div
@@ -233,7 +292,7 @@ export const DeltaSidebar: React.FC<DeltaSidebarProps> = ({
               >
                 {/* Header line */}
                 <div className="flex items-start justify-between gap-1.5 mb-1">
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1.5 flex-wrap">
                     {getDomainIcon(alert.domain)}
                     <span
                       className={`px-1.5 py-0.2 rounded text-[9px] font-bold uppercase tracking-wider ${
@@ -249,11 +308,26 @@ export const DeltaSidebar: React.FC<DeltaSidebarProps> = ({
                     <span className="text-[10px] text-[#888888] uppercase">
                       {alert.domain}
                     </span>
+                    {distanceKm !== null && (
+                      <span className="px-1 py-0.2 rounded text-[8px] bg-[#00ff41]/10 text-[#00ff41] border border-[#00ff41]/20">
+                        📍 {distanceKm.toFixed(0)} km
+                      </span>
+                    )}
                   </div>
 
-                  <span className="text-[9px] text-[#666666]">
-                    {new Date(alert.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={(e) => toggleStar(e, alert.id)}
+                      className="p-1 -m-1 rounded hover:bg-[#222222] transition-colors"
+                      title={isStarred ? "Starred - Click to remove follow-up" : "Star alert to follow-up"}
+                    >
+                      <Star className={`w-3.5 h-3.5 ${isStarred ? 'text-amber-400 fill-amber-400' : 'text-[#555555] hover:text-amber-300'}`} />
+                    </button>
+                    <span className="text-[9px] text-[#666666]">
+                      {new Date(alert.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
                 </div>
 
                 {/* Title */}

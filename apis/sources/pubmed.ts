@@ -25,7 +25,7 @@ export async function fetchPubMedHealthData(): Promise<{
 
     const response = await fetch(endpoint, {
       signal: controller.signal,
-      headers: { 'Accept': 'application/json', 'User-Agent': 'Miz-Intelligence/1.0' },
+      headers: { 'Accept': 'application/json', 'User-Agent': 'Crucix-Intelligence/1.0' },
     });
     clearTimeout(timeoutId);
 
