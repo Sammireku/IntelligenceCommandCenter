@@ -111,6 +111,16 @@ async function startServer() {
     res.json({ success: true, config: getSweepConfig() });
   });
 
+  // Serve worldLow.png directly from the workspace root for local client requests
+  app.get(['/worldLow.png', '/assets/worldLow.png'], (req, res) => {
+    const filePath = path.join(process.cwd(), 'worldLow.png');
+    res.sendFile(filePath, (err) => {
+      if (err) {
+        res.status(404).json({ error: 'worldLow.png not found in workspace' });
+      }
+    });
+  });
+
   // 3. VITE MIDDLEWARE (Development) vs STATIC SERVE (Production)
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({

@@ -27,7 +27,7 @@ import { calculateDistanceKm, generateWhatsAppAlertUrl } from '../utils/geoIntel
 import { playTacticalBlip } from '../utils/audio.js';
 
 export interface SelectedEntityData {
-  type: 'vessel' | 'flight' | 'earthquake' | 'disaster' | 'wildfire' | 'chokepoint' | 'storm' | 'jamming' | 'strike';
+  type: 'vessel' | 'flight' | 'earthquake' | 'disaster' | 'wildfire' | 'chokepoint' | 'storm' | 'jamming' | 'strike' | 'volcano';
   title: string;
   subtitle: string;
   lat: number;
@@ -100,6 +100,7 @@ export const EntityDetailCard: React.FC<EntityDetailCardProps> = ({
               {entity.type === 'storm' && <Wind className="w-5 h-5 text-cyan-400" />}
               {entity.type === 'jamming' && <Radio className="w-5 h-5 text-amber-400" />}
               {entity.type === 'strike' && <AlertOctagon className="w-5 h-5 text-rose-500" />}
+              {entity.type === 'volcano' && <span className="text-xl">🌋</span>}
             </div>
 
             <div>

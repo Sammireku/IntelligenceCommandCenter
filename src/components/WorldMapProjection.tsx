@@ -366,6 +366,66 @@ const HIGH_RES_LANDMASSES: Landmass[] = [
   },
 ];
 
+export interface VolcanoItem {
+  id: string;
+  name: string;
+  country: string;
+  lat: number;
+  lng: number;
+  elevationM: number;
+  status: string;
+  lastErupt: string;
+  threatLevel: 'LOW' | 'MODERATE' | 'HIGH' | 'EXTREME';
+}
+
+export const TECTONIC_PLATE_BOUNDARIES: [number, number][][] = [
+  // Pacific Ring of Fire Western Arc
+  [
+    [174, -41], [178, -37], [180, -32], [178, -25], [178, -20], [171, -15], 
+    [160, -10], [150, -6], [140, -3], [130, -1], [125, 5], [121, 13], 
+    [121, 20], [124, 25], [128, 30], [138, 35], [140, 40], [143, 45], 
+    [150, 50], [160, 55], [162, 60]
+  ],
+  // Pacific Ring of Fire Eastern Arc (Cascades/Andes)
+  [
+    [-150, 61], [-140, 60], [-130, 50], [-124, 45], [-122, 40], [-120, 35], 
+    [-115, 30], [-105, 20], [-90, 14], [-85, 10], [-80, 5], [-78, -2], 
+    [-77, -10], [-72, -20], [-70, -30], [-72, -40], [-74, -50], [-70, -55]
+  ],
+  // Mid-Atlantic Ridge
+  [
+    [-18, 65], [-22, 64], [-25, 55], [-30, 45], [-40, 35], [-30, 25], 
+    [-15, 15], [-20, 0], [-15, -10], [-10, -20], [-15, -30], [-12, -37], 
+    [-2, -50], [2, -54]
+  ],
+  // Alpine-Himalayan Belt
+  [
+    [-6, 36], [2, 38], [12, 38], [15, 41], [22, 38], [30, 38], 
+    [36, 39], [44, 40], [48, 37], [55, 33], [65, 34], [75, 35], 
+    [85, 30], [95, 28], [100, 20], [100, 10], [105, -2], [115, -7], 
+    [125, -8], [135, -5], [140, -2]
+  ],
+  // East African Rift
+  [
+    [43, 12], [40, 10], [38, 5], [36, 0], [35, -5], [34, -10], 
+    [35, -15], [35, -20]
+  ]
+];
+
+export const ACTIVE_VOLCANOES: VolcanoItem[] = [
+  { id: 'v-1', name: 'Mount Fuji', country: 'Japan', lat: 35.3606, lng: 138.7274, elevationM: 3776, status: 'Active (Dormant)', lastErupt: '1707', threatLevel: 'MODERATE' },
+  { id: 'v-2', name: 'Kilauea', country: 'USA (Hawaii)', lat: 19.421, lng: -155.287, elevationM: 1247, status: 'Erupting', lastErupt: '2023', threatLevel: 'EXTREME' },
+  { id: 'v-3', name: 'Mount Etna', country: 'Italy', lat: 37.751, lng: 14.993, elevationM: 3357, status: 'Erupting', lastErupt: '2024', threatLevel: 'EXTREME' },
+  { id: 'v-4', name: 'Sakurajima', country: 'Japan', lat: 31.593, lng: 130.657, elevationM: 1117, status: 'Active', lastErupt: '2024', threatLevel: 'HIGH' },
+  { id: 'v-5', name: 'Popocatépetl', country: 'Mexico', lat: 19.022, lng: -98.628, elevationM: 5426, status: 'Active', lastErupt: '2024', threatLevel: 'HIGH' },
+  { id: 'v-6', name: 'Krakatoa', country: 'Indonesia', lat: -6.102, lng: 105.423, elevationM: 813, status: 'Active', lastErupt: '2023', threatLevel: 'HIGH' },
+  { id: 'v-7', name: 'Mount Vesuvius', country: 'Italy', lat: 40.822, lng: 14.429, elevationM: 1281, status: 'Active (Dormant)', lastErupt: '1944', threatLevel: 'MODERATE' },
+  { id: 'v-8', name: 'Mauna Loa', country: 'USA (Hawaii)', lat: 19.472, lng: -155.592, elevationM: 4169, status: 'Active', lastErupt: '2022', threatLevel: 'HIGH' },
+  { id: 'v-9', name: 'Mayon', country: 'Philippines', lat: 13.257, lng: 123.685, elevationM: 2463, status: 'Active', lastErupt: '2023', threatLevel: 'HIGH' },
+  { id: 'v-10', name: 'Cotopaxi', country: 'Ecuador', lat: -0.681, lng: -78.436, elevationM: 5897, status: 'Active', lastErupt: '2023', threatLevel: 'HIGH' },
+  { id: 'v-11', name: 'Eyjafjallajökull', country: 'Iceland', lat: 63.633, lng: -19.633, elevationM: 1651, status: 'Active', lastErupt: '2010', threatLevel: 'MODERATE' },
+];
+
 // Major Global Megacities for Realistic Night Lights
 const GLOBAL_CITY_LIGHTS: { name: string; lat: number; lng: number; intensity: number }[] = [
   { name: 'Tokyo', lat: 35.67, lng: 139.65, intensity: 1.0 },
@@ -419,6 +479,10 @@ export const WorldMapProjection: React.FC<WorldMapProjectionProps> = ({
   const [globeRotation, setGlobeRotation] = useState<[number, number]>([15, 12]);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [nightModeTerminator, setNightModeTerminator] = useState<boolean>(true);
+  const [imageLoadError, setImageLoadError] = useState<boolean>(false);
+  const [backdropSrc, setBackdropSrc] = useState<string>("https://lh3.googleusercontent.com/d/1o2S2S2rWywBg1p5bDIz7hbgFOu5DJwAn");
+  const [backdropAttempt, setBackdropAttempt] = useState<number>(0);
+  const [legendVisible, setLegendVisible] = useState<boolean>(true);
 
   // Layer Toggles
   const [layers, setLayers] = useState({
@@ -435,6 +499,8 @@ export const WorldMapProjection: React.FC<WorldMapProjectionProps> = ({
     strikes: true,
     topography: true,
     cityLights: true,
+    tectonicPlates: true,
+    volcanoes: true,
   });
 
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -889,6 +955,34 @@ export const WorldMapProjection: React.FC<WorldMapProjectionProps> = ({
           <Sun className="w-3 h-3" />
           City Lights
         </button>
+
+        {/* Tectonic Plate Boundaries */}
+        <button
+          type="button"
+          onClick={() => toggleLayer('tectonicPlates')}
+          className={`px-2 py-0.5 rounded border transition-colors flex items-center gap-1 ${
+            layers.tectonicPlates
+              ? 'bg-orange-950/60 text-orange-200 border-orange-500/70'
+              : 'bg-[#070d18] text-[#4d667c] border-[#162338]'
+          }`}
+        >
+          <span>🌐</span>
+          Tectonic Plates ({TECTONIC_PLATE_BOUNDARIES.length} Faults)
+        </button>
+
+        {/* Volcanoes */}
+        <button
+          type="button"
+          onClick={() => toggleLayer('volcanoes')}
+          className={`px-2 py-0.5 rounded border transition-colors flex items-center gap-1 ${
+            layers.volcanoes
+              ? 'bg-rose-950/80 text-rose-300 border-rose-600 font-bold'
+              : 'bg-[#070d18] text-[#4d667c] border-[#162338]'
+          }`}
+        >
+          <span>🌋</span>
+          Volcanoes ({ACTIVE_VOLCANOES.length})
+        </button>
       </div>
 
        {/* Primary Interactive Full-Width GIS Canvas */}
@@ -1036,18 +1130,43 @@ export const WorldMapProjection: React.FC<WorldMapProjectionProps> = ({
             </defs>
 
             {/* Deep Ocean Basin (Base) */}
-            <rect width="1000" height="500" fill="url(#ocean-bathymetry)" opacity="0.48" />
+            <rect width="1000" height="500" fill={imageLoadError ? "url(#ocean-bathymetry)" : "#1c1c1c"} />
 
-            {/* Premium Satellite Photorealistic World Map Backdrop */}
-            <image
-              href="https://stock.adobe.com/search?k=world+map+flat"
-              x="0"
-              y="0"
-              width="1000"
-              height="500"
-              preserveAspectRatio="none"
-              opacity="1.0"
-            />
+            {/* Custom Gold-Tan worldLow Map Backdrop */}
+            {!imageLoadError ? (
+              <image
+                href={backdropSrc}
+                x="0"
+                y="0"
+                width="1000"
+                height="500"
+                preserveAspectRatio="none"
+                opacity="1.0"
+                style={{
+                  transform: 'scale(1.5) translateX(40px) translateY(5px)',
+                  transformOrigin: '500px 250px',
+                  overflow: 'hidden'
+                }}
+                onError={() => {
+                  if (backdropAttempt === 0) {
+                    console.warn('[MILZ Sentry] Primary Google Drive backdrop image failed. Trying alternative export URL...');
+                    setBackdropSrc("https://drive.google.com/file/d/1_PfMsS8m4HQDPeHJ5lb1R75rYdxUgiIg/view?usp=sharing");
+                    setBackdropAttempt(1);
+                  } else if (backdropAttempt === 1) {
+                    console.warn('[MILZ Sentry] Alternative Google Drive backdrop image failed. Trying local/public image...');
+                    setBackdropSrc("/worldUltra.png");
+                    setBackdropAttempt(2);
+                  } else if (backdropAttempt === 2) {
+                    console.warn('[MILZ Sentry] Custom backdrop images failed. Falling back to photorealistic satellite image...');
+                    setBackdropSrc("https://images.unsplash.com/photo-1614730321146-b6fa6a46bcb4?auto=format&fit=crop&q=80&w=1200");
+                    setBackdropAttempt(3);
+                  } else {
+                    console.warn('[MILZ Sentry] All backdrops failed. Engaging vector topology fallback.');
+                    setImageLoadError(true);
+                  }
+                }}
+              />
+            ) : null}
 
             {/* Active Real-Time Sweep Feedback Radar Beam */}
             {(() => {
@@ -1084,25 +1203,27 @@ export const WorldMapProjection: React.FC<WorldMapProjectionProps> = ({
               );
             })()}
 
-            {/* Bathymetric Oceanic Trenches & Continental Shelves */}
-            <g opacity="0.6">
-              {/* Mid-Atlantic Ridge */}
-              <path
-                d="M 450,60 Q 420,150 460,250 T 450,400"
-                stroke="#0e3a63"
-                strokeWidth="2.5"
-                strokeDasharray="6 4"
-                fill="none"
-              />
-              {/* Mariana Trench & Pacific Rim */}
-              <path
-                d="M 850,120 Q 900,250 860,380"
-                stroke="#0e3a63"
-                strokeWidth="2"
-                strokeDasharray="5 5"
-                fill="none"
-              />
-            </g>
+            {/* Bathymetric Oceanic Trenches & Continental Shelves (Fallback only) */}
+            {imageLoadError && (
+              <g opacity="0.6">
+                {/* Mid-Atlantic Ridge */}
+                <path
+                  d="M 450,60 Q 420,150 460,250 T 450,400"
+                  stroke="#0e3a63"
+                  strokeWidth="2.5"
+                  strokeDasharray="6 4"
+                  fill="none"
+                />
+                {/* Mariana Trench & Pacific Rim */}
+                <path
+                  d="M 850,120 Q 900,250 860,380"
+                  stroke="#0e3a63"
+                  strokeWidth="2"
+                  strokeDasharray="5 5"
+                  fill="none"
+                />
+              </g>
+            )}
 
             {/* Precision Latitude & Longitude Graticule Matrix */}
             <g stroke="#10253d" strokeWidth="0.5" opacity="0.65">
@@ -1122,64 +1243,65 @@ export const WorldMapProjection: React.FC<WorldMapProjectionProps> = ({
               ))}
             </g>
 
-            {/* Render High-Fidelity Realistic Landmasses */}
-            {HIGH_RES_LANDMASSES.map((land) => {
-              const pathData = land.points
-                .map((pt, i) => {
-                  const [px, py] = project2D(pt[0], pt[1]);
-                  return `${i === 0 ? 'M' : 'L'} ${px.toFixed(1)} ${py.toFixed(1)}`;
-                })
-                .join(' ') + ' Z';
+            {/* Render High-Fidelity Realistic Landmasses (Fallback only) */}
+            {imageLoadError &&
+              HIGH_RES_LANDMASSES.map((land) => {
+                const pathData = land.points
+                  .map((pt, i) => {
+                    const [px, py] = project2D(pt[0], pt[1]);
+                    return `${i === 0 ? 'M' : 'L'} ${px.toFixed(1)} ${py.toFixed(1)}`;
+                  })
+                  .join(' ') + ' Z';
 
-              return (
-                <g key={land.name}>
-                   {/* Continental Shelf Turquoise Coastal Shallows */}
-                  <path
-                    d={pathData}
-                    fill="none"
-                    stroke="#00b4d8"
-                    strokeWidth="5"
-                    opacity="0.1"
-                    filter="url(#coastal-glow)"
-                  />
-                  <path
-                    d={pathData}
-                    fill="none"
-                    stroke="#175073"
-                    strokeWidth="2"
-                    opacity="0.15"
-                  />
- 
-                   {/* Continent Surface with Biome Texturing */}
-                   <path
-                     d={pathData}
-                     fill={land.biomeGradient}
-                     stroke="#234a36"
-                     strokeWidth="0.85"
-                     className="transition-colors hover:brightness-110"
-                     opacity="0.22"
-                   />
-
-                  {/* Topographic Mountain Ridges */}
-                  {layers.topography && land.elevationRidge && (
-                    <polyline
-                      points={land.elevationRidge
-                        .map((pt) => {
-                          const [rx, ry] = project2D(pt[0], pt[1]);
-                          return `${rx.toFixed(1)},${ry.toFixed(1)}`;
-                        })
-                        .join(' ')}
+                return (
+                  <g key={land.name}>
+                     {/* Continental Shelf Turquoise Coastal Shallows */}
+                    <path
+                      d={pathData}
                       fill="none"
-                      stroke="#8b7355"
-                      strokeWidth="2.5"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      opacity="0.75"
+                      stroke="#00b4d8"
+                      strokeWidth="5"
+                      opacity="0.1"
+                      filter="url(#coastal-glow)"
                     />
-                  )}
-                </g>
-              );
-            })}
+                    <path
+                      d={pathData}
+                      fill="none"
+                      stroke="#175073"
+                      strokeWidth="2"
+                      opacity="0.15"
+                    />
+   
+                     {/* Continent Surface with Biome Texturing */}
+                     <path
+                       d={pathData}
+                       fill={land.biomeGradient}
+                       stroke="#234a36"
+                       strokeWidth="0.85"
+                       className="transition-colors hover:brightness-110"
+                       opacity="0.22"
+                     />
+
+                    {/* Topographic Mountain Ridges */}
+                    {layers.topography && land.elevationRidge && (
+                      <polyline
+                        points={land.elevationRidge
+                          .map((pt) => {
+                            const [rx, ry] = project2D(pt[0], pt[1]);
+                            return `${rx.toFixed(1)},${ry.toFixed(1)}`;
+                          })
+                          .join(' ')}
+                        fill="none"
+                        stroke="#8b7355"
+                        strokeWidth="2.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        opacity="0.75"
+                      />
+                    )}
+                  </g>
+                );
+              })}
 
             {/* City Night Lights Layer */}
             {layers.cityLights &&
@@ -1568,6 +1690,98 @@ export const WorldMapProjection: React.FC<WorldMapProjectionProps> = ({
                 );
               })}
 
+            {/* Tectonic Plate Boundaries */}
+            {layers.tectonicPlates &&
+              TECTONIC_PLATE_BOUNDARIES.map((boundary, bidx) => {
+                const pointsStr = boundary
+                  .map((pt) => {
+                    const [bx, by] = project2D(pt[0], pt[1]);
+                    return `${bx.toFixed(1)},${by.toFixed(1)}`;
+                  })
+                  .join(' ');
+                
+                return (
+                  <g key={`plate-boundary-${bidx}`}>
+                    {/* Glowing outer shadow line */}
+                    <polyline
+                      points={pointsStr}
+                      fill="none"
+                      stroke="#f97316"
+                      strokeWidth="3"
+                      opacity="0.3"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                    {/* Sharp inner core line */}
+                    <polyline
+                      points={pointsStr}
+                      fill="none"
+                      stroke="#fb923c"
+                      strokeWidth="1"
+                      opacity="0.75"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeDasharray="5 3"
+                    />
+                  </g>
+                );
+              })}
+
+            {/* Active Volcanoes Overlay */}
+            {layers.volcanoes &&
+              ACTIVE_VOLCANOES.map((volcano) => {
+                const [vx, vy] = project2D(volcano.lng, volcano.lat);
+                const color =
+                  volcano.threatLevel === 'EXTREME'
+                    ? '#ef4444'
+                    : volcano.threatLevel === 'HIGH'
+                    ? '#f97316'
+                    : '#eab308';
+                
+                return (
+                  <g
+                    key={volcano.id}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      playTacticalBlip(1500);
+                      setSelectedEntity({
+                        type: 'volcano',
+                        title: `🌋 VOLCANO: ${volcano.name}`,
+                        subtitle: `${volcano.country} • Elevation ${volcano.elevationM}m`,
+                        lat: volcano.lat,
+                        lng: volcano.lng,
+                        severity: volcano.threatLevel === 'EXTREME' ? 'FLASH' : 'PRIORITY',
+                        attributes: [
+                          { label: 'Status', value: volcano.status, color: 'text-rose-400' },
+                          { label: 'Threat Level', value: volcano.threatLevel, color: 'text-amber-400 font-bold' },
+                          { label: 'Elevation', value: `${volcano.elevationM} m`, color: 'text-white' },
+                          { label: 'Last Eruption', value: volcano.lastErupt, color: 'text-sky-300' },
+                        ],
+                        description: `Volcanic system active along global plate boundaries. Registered status: ${volcano.status}. Last significant activity: ${volcano.lastErupt}.`,
+                        deskId: 'geospatial',
+                        deskLabel: 'Geospatial Desk',
+                        rawItem: volcano,
+                      });
+                    }}
+                    className="cursor-pointer"
+                  >
+                    {/* Glowing base aura */}
+                    <circle cx={vx} cy={vy} r="8" fill="rgba(239, 68, 68, 0.15)" className="animate-pulse" />
+                    {/* Triangle Volcano Glyph */}
+                    <polygon
+                      points={`${vx},${vy - 6} ${vx + 5},${vy + 3} ${vx - 5},${vy + 3}`}
+                      fill={color}
+                      stroke="#ffffff"
+                      strokeWidth="0.8"
+                    />
+                    {/* Dynamic volcanic activity smoke indicator */}
+                    {volcano.status === 'Erupting' && (
+                      <circle cx={vx} cy={vy - 7} r="2" fill="#9ca3af" className="animate-ping" />
+                    )}
+                  </g>
+                );
+              })}
+
             {/* AIS Maritime Vessels */}
             {layers.vessels &&
               trackedVessels.map((vessel) => {
@@ -1868,6 +2082,90 @@ export const WorldMapProjection: React.FC<WorldMapProjectionProps> = ({
                 );
               })}
 
+            {/* 3D Tectonic Plate Boundaries */}
+            {layers.tectonicPlates &&
+              TECTONIC_PLATE_BOUNDARIES.map((boundary, bidx) => {
+                const projectedPoints = boundary.map((pt) =>
+                  project3D(pt[0], pt[1], globeRotation[0], globeRotation[1], 190, 500, 250)
+                );
+
+                const visibleCount = projectedPoints.filter((p) => p.visible).length;
+                if (visibleCount < 2) return null;
+
+                const pathData = projectedPoints
+                  .map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`)
+                  .join(' ');
+
+                return (
+                  <path
+                    key={`3d-plate-boundary-${bidx}`}
+                    d={pathData}
+                    fill="none"
+                    stroke="#fb923c"
+                    strokeWidth="1.2"
+                    opacity="0.8"
+                    strokeDasharray="4 2"
+                  />
+                );
+              })}
+
+            {/* 3D Active Volcanoes */}
+            {layers.volcanoes &&
+              ACTIVE_VOLCANOES.map((volcano) => {
+                const proj = project3D(
+                  volcano.lng,
+                  volcano.lat,
+                  globeRotation[0],
+                  globeRotation[1],
+                  190,
+                  500,
+                  250
+                );
+                if (!proj.visible) return null;
+
+                const color =
+                  volcano.threatLevel === 'EXTREME'
+                    ? '#ef4444'
+                    : volcano.threatLevel === 'HIGH'
+                    ? '#f97316'
+                    : '#eab308';
+
+                return (
+                  <g
+                    key={`3d-volcano-${volcano.id}`}
+                    onClick={() => {
+                      playTacticalBlip(1500);
+                      setSelectedEntity({
+                        type: 'volcano',
+                        title: `🌋 VOLCANO: ${volcano.name}`,
+                        subtitle: `${volcano.country} • Elevation ${volcano.elevationM}m`,
+                        lat: volcano.lat,
+                        lng: volcano.lng,
+                        severity: volcano.threatLevel === 'EXTREME' ? 'FLASH' : 'PRIORITY',
+                        attributes: [
+                          { label: 'Status', value: volcano.status, color: 'text-rose-400' },
+                          { label: 'Threat Level', value: volcano.threatLevel, color: 'text-amber-400 font-bold' },
+                          { label: 'Elevation', value: `${volcano.elevationM} m`, color: 'text-white' },
+                          { label: 'Last Eruption', value: volcano.lastErupt, color: 'text-sky-300' },
+                        ],
+                        description: `Volcanic system active along global plate boundaries. Registered status: ${volcano.status}. Last significant activity: ${volcano.lastErupt}.`,
+                        deskId: 'geospatial',
+                        deskLabel: 'Geospatial Desk',
+                        rawItem: volcano,
+                      });
+                    }}
+                    className="cursor-pointer"
+                  >
+                    <polygon
+                      points={`${proj.x},${proj.y - 5} ${proj.x + 4},${proj.y + 3} ${proj.x - 4},${proj.y + 3}`}
+                      fill={color}
+                      stroke="#ffffff"
+                      strokeWidth="0.7"
+                    />
+                  </g>
+                );
+              })}
+
             {/* 3D User Location */}
             {layers.userFocal && userLocation && (() => {
               const uProj = project3D(
@@ -1899,6 +2197,185 @@ export const WorldMapProjection: React.FC<WorldMapProjectionProps> = ({
               );
             })()}
           </svg>
+        )}
+
+        {/* Dynamic Legend Overlays (explains Earthquakes, Wildfires, & Infrastructure) */}
+        {legendVisible ? (
+          <div className="absolute bottom-14 right-3 z-30 bg-[#070d18]/95 border border-[#162338] rounded-lg p-2.5 w-60 shadow-2xl backdrop-blur-md pointer-events-auto select-none text-[10px] font-mono space-y-2">
+            <div className="flex items-center justify-between border-b border-[#162338] pb-1">
+              <span className="text-[#00ff41] font-bold tracking-wider">🛰️ VECTOR LAYER LEGEND</span>
+              <button
+                type="button"
+                onClick={() => setLegendVisible(false)}
+                className="text-[#55718a] hover:text-rose-400 transition-colors font-bold text-[12px] px-1"
+                title="Hide Legend"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-1.5">
+              {/* 1. Earthquakes Group */}
+              <div
+                onClick={() => toggleLayer('earthquakes')}
+                className={`p-1.5 rounded border transition-colors cursor-pointer flex flex-col gap-1 ${
+                  layers.earthquakes
+                    ? 'bg-[#102a45]/30 border-[#00d1ff]/30 hover:bg-[#102a45]/50'
+                    : 'bg-black/40 border-transparent opacity-50 hover:opacity-80'
+                }`}
+              >
+                <div className="flex items-center justify-between font-bold">
+                  <span className="text-white flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-rose-500 inline-block animate-pulse"></span>
+                    Seismic Activities
+                  </span>
+                  <span className="text-[#00d1ff]">{earthquakes?.length || 0} nodes</span>
+                </div>
+                <div className="text-[9px] text-[#888888] flex items-center gap-2 pl-3">
+                  <span className="flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#ef4444] inline-block"></span> M5.0+ Major
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#f59e0b] inline-block"></span> M3.0+ Minor
+                  </span>
+                </div>
+              </div>
+
+              {/* 2. Wildfire/Thermal Hotspots Group */}
+              <div
+                onClick={() => toggleLayer('wildfires')}
+                className={`p-1.5 rounded border transition-colors cursor-pointer flex flex-col gap-1 ${
+                  layers.wildfires
+                    ? 'bg-amber-950/20 border-amber-600/30 hover:bg-amber-950/40'
+                    : 'bg-black/40 border-transparent opacity-50 hover:opacity-80'
+                }`}
+              >
+                <div className="flex items-center justify-between font-bold">
+                  <span className="text-white flex items-center gap-1">
+                    <Flame className="w-3.5 h-3.5 text-amber-500" />
+                    Thermal Hotspots
+                  </span>
+                  <span className="text-amber-400">{fireAnomalies?.length || 0} points</span>
+                </div>
+                <div className="text-[9px] text-[#888888] pl-4">
+                  NASA FIRMS active infrared hotspots & fire vectors
+                </div>
+              </div>
+
+              {/* 3. Infrastructure & Strategic Gateways Group */}
+              <div className="p-1.5 rounded border bg-[#0d1527]/30 border-[#162338] space-y-1">
+                <span className="text-[#55718a] font-bold block border-b border-[#162338]/40 pb-0.5 uppercase tracking-wider text-[9px]">
+                  ⚡ Infrastructure Nodes
+                </span>
+
+                {/* Flights toggle */}
+                <div
+                  onClick={() => toggleLayer('flights')}
+                  className={`flex items-center justify-between px-1 py-0.5 rounded cursor-pointer transition-colors ${
+                    layers.flights ? 'text-white hover:bg-[#162338]' : 'text-[#555] line-through'
+                  }`}
+                >
+                  <span className="flex items-center gap-1">
+                    <Plane className={`w-3.5 h-3.5 ${layers.flights ? 'text-[#00ff41]' : 'text-[#444]'}`} />
+                    Air Traffic (ADS-B)
+                  </span>
+                  <span className={layers.flights ? 'text-[#00ff41]' : 'text-[#444]'}>
+                    {emergencySquawks?.length || 0} squawks
+                  </span>
+                </div>
+
+                {/* Vessels toggle */}
+                <div
+                  onClick={() => toggleLayer('vessels')}
+                  className={`flex items-center justify-between px-1 py-0.5 rounded cursor-pointer transition-colors ${
+                    layers.vessels ? 'text-white hover:bg-[#162338]' : 'text-[#555] line-through'
+                  }`}
+                >
+                  <span className="flex items-center gap-1">
+                    <Ship className={`w-3.5 h-3.5 ${layers.vessels ? 'text-[#00d1ff]' : 'text-[#444]'}`} />
+                    Maritime AIS Telemetry
+                  </span>
+                  <span className={layers.vessels ? 'text-[#00d1ff]' : 'text-[#444]'}>
+                    {trackedVessels?.length || 0} ships
+                  </span>
+                </div>
+
+                {/* Chokepoints toggle */}
+                <div
+                  onClick={() => toggleLayer('chokepoints')}
+                  className={`flex items-center justify-between px-1 py-0.5 rounded cursor-pointer transition-colors ${
+                    layers.chokepoints ? 'text-white hover:bg-[#162338]' : 'text-[#555] line-through'
+                  }`}
+                >
+                  <span className="flex items-center gap-1">
+                    <Anchor className={`w-3.5 h-3.5 ${layers.chokepoints ? 'text-amber-500' : 'text-[#444]'}`} />
+                    Strategic Chokepoints
+                  </span>
+                  <span className={layers.chokepoints ? 'text-amber-500' : 'text-[#444]'}>
+                    {chokepoints?.length || 0} locks
+                  </span>
+                </div>
+
+                {/* GPS Jamming toggle */}
+                <div
+                  onClick={() => toggleLayer('gpsJamming')}
+                  className={`flex items-center justify-between px-1 py-0.5 rounded cursor-pointer transition-colors ${
+                    layers.gpsJamming ? 'text-white hover:bg-[#162338]' : 'text-[#555] line-through'
+                  }`}
+                >
+                  <span className="flex items-center gap-1">
+                    <Radio className={`w-3.5 h-3.5 ${layers.gpsJamming ? 'text-purple-400' : 'text-[#444]'}`} />
+                    GPS Jamming Sectors
+                  </span>
+                  <span className={layers.gpsJamming ? 'text-purple-400' : 'text-[#444]'}>
+                    {gpsJammingZones?.length || 0} zones
+                  </span>
+                </div>
+
+                {/* Tectonic Plates toggle */}
+                <div
+                  onClick={() => toggleLayer('tectonicPlates')}
+                  className={`flex items-center justify-between px-1 py-0.5 rounded cursor-pointer transition-colors ${
+                    layers.tectonicPlates ? 'text-white hover:bg-[#162338]' : 'text-[#555] line-through'
+                  }`}
+                >
+                  <span className="flex items-center gap-1">
+                    <span className={`text-[12px] ${layers.tectonicPlates ? 'opacity-100' : 'opacity-30'}`}>🌐</span>
+                    Tectonic Fault Lines
+                  </span>
+                  <span className={layers.tectonicPlates ? 'text-orange-400 font-bold' : 'text-[#444]'}>
+                    {TECTONIC_PLATE_BOUNDARIES.length} belts
+                  </span>
+                </div>
+
+                {/* Volcanoes toggle */}
+                <div
+                  onClick={() => toggleLayer('volcanoes')}
+                  className={`flex items-center justify-between px-1 py-0.5 rounded cursor-pointer transition-colors ${
+                    layers.volcanoes ? 'text-white hover:bg-[#162338]' : 'text-[#555] line-through'
+                  }`}
+                >
+                  <span className="flex items-center gap-1">
+                    <span className={`text-[12px] ${layers.volcanoes ? 'opacity-100' : 'opacity-30'}`}>🌋</span>
+                    Active Volcanoes
+                  </span>
+                  <span className={layers.volcanoes ? 'text-rose-400 font-bold' : 'text-[#444]'}>
+                    {ACTIVE_VOLCANOES.length} vents
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : (
+          /* Floating toggle to bring back the legend */
+          <button
+            type="button"
+            onClick={() => setLegendVisible(true)}
+            className="absolute bottom-14 right-3 z-30 bg-[#070d18]/95 hover:bg-[#102a45] border border-[#162338] hover:border-[#00d1ff] rounded-lg p-2 flex items-center gap-1.5 shadow-2xl backdrop-blur-md text-[10px] font-mono text-[#00ff41] transition-all pointer-events-auto"
+          >
+            <Layers className="w-3.5 h-3.5" />
+            <span>SHOW LEGEND</span>
+          </button>
         )}
 
         {/* HUD Quick Jump Targets & Target Search Strip */}

@@ -99,14 +99,52 @@ Return your response strictly in valid JSON matching this schema:
 }
 `;
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.7-flash',
-        contents: prompt,
-        config: {
-          responseMimeType: 'application/json',
-          temperature: 0.2,
-        },
-      });
+      let response;
+      let lastErr: any = null;
+      const maxRetries = 3;
+      let delay = 1000;
+
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          response = await ai.models.generateContent({
+            model: 'gemini-3.7-flash',
+            contents: prompt,
+            config: {
+              responseMimeType: 'application/json',
+              temperature: 0.2,
+            },
+          });
+          lastErr = null;
+          break;
+        } catch (err: any) {
+          lastErr = err;
+          const isTransient =
+            err.status === 503 ||
+            err.code === 503 ||
+            err.status === 429 ||
+            err.code === 429 ||
+            (err.message && (
+              err.message.includes('503') ||
+              err.message.includes('429') ||
+              err.message.toLowerCase().includes('high demand') ||
+              err.message.toLowerCase().includes('temporary') ||
+              err.message.toLowerCase().includes('resource_exhausted') ||
+              err.message.toLowerCase().includes('unavailable')
+            ));
+
+          if (isTransient && attempt < maxRetries) {
+            console.log(`[AI Synthesis] Gemini transient warning. Retrying in ${delay}ms... (Attempt ${attempt}/${maxRetries})`);
+            await new Promise((resolve) => setTimeout(resolve, delay));
+            delay *= 2;
+          } else {
+            break;
+          }
+        }
+      }
+
+      if (lastErr) {
+        throw lastErr;
+      }
 
       const text = response.text?.trim() || '';
       const parsed = JSON.parse(text);
@@ -125,7 +163,7 @@ Return your response strictly in valid JSON matching this schema:
         geopoliticalImplications: parsed.geopoliticalImplications || [],
       };
     } catch (err: any) {
-      console.warn('[AI Synthesis] Gemini synthesis error, using heuristic fallback:', err.message);
+      console.log('[AI Synthesis] Neutral local fallback engaged. External model is offline or rate-limited.');
     }
   }
 

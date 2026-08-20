@@ -48,17 +48,31 @@ export function App() {
     const saved = localStorage.getItem('crucix_user_location');
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        // Auto-migrate Tokyo or default nodes to Accra, Ghana
+        if (parsed.name && (parsed.name.includes('Tokyo') || parsed.lat === 35.6762)) {
+          const accra = {
+            lat: 5.6037,
+            lng: -0.1870,
+            name: 'Accra, Ghana (Focal Node)',
+            isLiveGps: false,
+          };
+          localStorage.setItem('crucix_user_location', JSON.stringify(accra));
+          return accra;
+        }
+        return parsed;
       } catch (e) {
         // ignore
       }
     }
-    return {
-      lat: 35.6762,
-      lng: 139.6503,
-      name: 'Tokyo, Japan (Default Node)',
+    const defaultLoc = {
+      lat: 5.6037,
+      lng: -0.1870,
+      name: 'Accra, Ghana (Focal Node)',
       isLiveGps: false,
     };
+    localStorage.setItem('crucix_user_location', JSON.stringify(defaultLoc));
+    return defaultLoc;
   });
 
   // WhatsApp Alert Configuration

@@ -265,117 +265,199 @@ export const DeltaSidebar: React.FC<DeltaSidebarProps> = ({
       </div>
 
       {/* Alerts Feed List */}
-      <div id="delta-alerts-list" className="flex-1 overflow-y-auto p-2 space-y-2 font-mono">
-        {filteredAlerts.length === 0 ? (
-          <div className="text-center py-8 text-xs text-[#666666]">
-            No alerts matching active filter.
-          </div>
-        ) : (
-          filteredAlerts.map(({ alert, distanceKm }) => {
-            const isExpanded = expandedAlertId === alert.id;
-            const isFlash = alert.tier === 'FLASH';
-            const isPriority = alert.tier === 'PRIORITY';
-            const isStarred = starredIds.includes(alert.id);
-
+      <div id="delta-alerts-list" className="flex-1 overflow-y-auto p-2 space-y-4 font-mono">
+        {(() => {
+          if (filteredAlerts.length === 0) {
             return (
-              <div
-                key={alert.id}
-                id={`alert-card-${alert.id}`}
-                onClick={() => setExpandedAlertId(isExpanded ? null : alert.id)}
-                className={`p-2.5 rounded border transition-all cursor-pointer ${
-                  isFlash
-                    ? 'bg-rose-950/30 border-rose-700/60 hover:border-rose-400 shadow-[0_0_10px_rgba(239,68,68,0.1)]'
-                    : isPriority
-                    ? 'bg-amber-950/20 border-amber-700/50 hover:border-amber-400'
-                    : 'bg-[#121212] border-[#1f1f1f] hover:border-[#2f2f2f]'
-                }`}
-              >
-                {/* Header line */}
-                <div className="flex items-start justify-between gap-1.5 mb-1">
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    {getDomainIcon(alert.domain)}
-                    <span
-                      className={`px-1.5 py-0.2 rounded text-[9px] font-bold uppercase tracking-wider ${
-                        isFlash
-                          ? 'bg-rose-900 text-rose-200'
-                          : isPriority
-                          ? 'bg-amber-900 text-amber-200'
-                          : 'bg-[#1a1a1a] text-[#a0a0a0]'
-                      }`}
-                    >
-                      {alert.tier}
-                    </span>
-                    <span className="text-[10px] text-[#888888] uppercase">
-                      {alert.domain}
-                    </span>
-                    {distanceKm !== null && (
-                      <span className="px-1 py-0.2 rounded text-[8px] bg-[#00ff41]/10 text-[#00ff41] border border-[#00ff41]/20">
-                        📍 {distanceKm.toFixed(0)} km
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={(e) => toggleStar(e, alert.id)}
-                      className="p-1 -m-1 rounded hover:bg-[#222222] transition-colors"
-                      title={isStarred ? "Starred - Click to remove follow-up" : "Star alert to follow-up"}
-                    >
-                      <Star className={`w-3.5 h-3.5 ${isStarred ? 'text-amber-400 fill-amber-400' : 'text-[#555555] hover:text-amber-300'}`} />
-                    </button>
-                    <span className="text-[9px] text-[#666666]">
-                      {new Date(alert.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Title */}
-                <h3 className={`text-xs font-medium font-sans mb-1 leading-snug ${
-                  isFlash ? 'text-rose-100 font-semibold' : isPriority ? 'text-amber-100' : 'text-[#f0f0f0]'
-                }`}>
-                  {alert.title.replace(/^[🔴🟡🔵]\s[A-Z]+:\s/, '')}
-                </h3>
-
-                {/* Summary Snippet */}
-                <p className="text-[11px] text-[#a0a0a0] line-clamp-2 leading-relaxed font-sans">
-                  {alert.summary}
-                </p>
-
-                {/* Expanded Details */}
-                {isExpanded && (
-                  <div className="mt-2 pt-2 border-t border-[#1f1f1f] space-y-1.5 text-[10px]">
-                    {alert.metrics && (
-                      <div className="grid grid-cols-2 gap-1 bg-[#080808] border border-[#1a1a1a] p-1.5 rounded">
-                        {Object.entries(alert.metrics).map(([k, v]) => (
-                          <div key={k}>
-                            <span className="text-[#737373]">{k}: </span>
-                            <span className="text-[#00d1ff] font-semibold">{v}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    <div className="flex items-center justify-between text-[#888888] pt-1">
-                      <span>Time: {new Date(alert.timestamp).toLocaleString()}</span>
-                      {alert.sourceUrl && (
-                        <a
-                          href={alert.sourceUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          onClick={(e) => e.stopPropagation()}
-                          className="text-[#00ff41] hover:underline flex items-center gap-1"
-                        >
-                          Source <ExternalLink className="w-3 h-3" />
-                        </a>
-                      )}
-                    </div>
-                  </div>
-                )}
+              <div className="text-center py-8 text-xs text-[#666666]">
+                No alerts matching active filter.
               </div>
             );
-          })
-        )}
+          }
+
+          // Category mapping helper
+          const getCategoryForDomain = (domain: string): string => {
+            const d = domain.toLowerCase();
+            if (d.includes('geo') || d.includes('space') || d.includes('earth') || d.includes('weather') || d.includes('disaster')) return 'geospatial';
+            if (d.includes('market') || d.includes('finance') || d.includes('crypto') || d.includes('trade')) return 'markets';
+            if (d.includes('health') || d.includes('bio') || d.includes('pharma') || d.includes('medical') || d.includes('covid') || d.includes('disease')) return 'health';
+            if (d.includes('infra') || d.includes('cyber') || d.includes('gps') || d.includes('jam') || d.includes('transit') || d.includes('vessel') || d.includes('flight') || d.includes('maritime') || d.includes('telecom')) return 'infrastructure';
+            return 'synthesis';
+          };
+
+          const categories = [
+            {
+              id: 'geospatial',
+              name: '🌍 Geospatial Anomalies',
+              limit: 8,
+              borderColor: 'border-sky-500/20',
+              bgColor: 'bg-sky-950/5',
+              textColor: 'text-sky-400',
+            },
+            {
+              id: 'markets',
+              name: '📈 Financial Markets',
+              limit: 4, // <5 as requested
+              borderColor: 'border-emerald-500/20',
+              bgColor: 'bg-emerald-950/5',
+              textColor: 'text-emerald-400',
+            },
+            {
+              id: 'health',
+              name: '🧬 Biomedical & Health',
+              limit: 5,
+              borderColor: 'border-purple-500/20',
+              bgColor: 'bg-purple-950/5',
+              textColor: 'text-purple-400',
+            },
+            {
+              id: 'infrastructure',
+              name: '⚡ Infrastructure & EW',
+              limit: 5,
+              borderColor: 'border-amber-500/20',
+              bgColor: 'bg-amber-950/5',
+              textColor: 'text-amber-400',
+            },
+            {
+              id: 'synthesis',
+              name: '🤖 AI Synthesis & General',
+              limit: 5,
+              borderColor: 'border-cyan-500/20',
+              bgColor: 'bg-cyan-950/5',
+              textColor: 'text-cyan-400',
+            }
+          ];
+
+          return (
+            <div className="space-y-4">
+              {categories.map((cat) => {
+                const catAlerts = filteredAlerts.filter(({ alert }) => getCategoryForDomain(alert.domain) === cat.id);
+                if (catAlerts.length === 0) return null;
+
+                const visibleAlerts = catAlerts.slice(0, cat.limit);
+
+                return (
+                  <div key={cat.id} className={`border border-[#1a1a1a] rounded bg-[#070707] overflow-hidden`}>
+                    {/* Container Header */}
+                    <div className="px-3 py-2 bg-[#0c0c0c] border-b border-[#1a1a1a] flex items-center justify-between">
+                      <span className={`text-[10px] font-bold ${cat.textColor} uppercase tracking-wider`}>
+                        {cat.name}
+                      </span>
+                      <span className="text-[9px] text-[#666666] font-mono bg-[#121212] px-1.5 py-0.5 rounded border border-[#1a1a1a]">
+                        {visibleAlerts.length} shown ({catAlerts.length} total)
+                      </span>
+                    </div>
+
+                    {/* Container Body - Scrollable */}
+                    <div className="max-h-64 overflow-y-auto p-1.5 space-y-1.5 custom-scrollbar">
+                      {visibleAlerts.map(({ alert, distanceKm }) => {
+                        const isExpanded = expandedAlertId === alert.id;
+                        const isFlash = alert.tier === 'FLASH';
+                        const isPriority = alert.tier === 'PRIORITY';
+                        const isStarred = starredIds.includes(alert.id);
+
+                        return (
+                          <div
+                            key={alert.id}
+                            id={`alert-card-${alert.id}`}
+                            onClick={() => setExpandedAlertId(isExpanded ? null : alert.id)}
+                            className={`p-2 rounded border transition-all cursor-pointer ${
+                              isFlash
+                                ? 'bg-rose-950/30 border-rose-700/60 hover:border-rose-400 shadow-[0_0_10px_rgba(239,68,68,0.1)]'
+                                : isPriority
+                                ? 'bg-amber-950/20 border-amber-700/50 hover:border-amber-400'
+                                : 'bg-[#121212] border-[#1f1f1f] hover:border-[#2f2f2f]'
+                            }`}
+                          >
+                            {/* Header line */}
+                            <div className="flex items-start justify-between gap-1.5 mb-1">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                {getDomainIcon(alert.domain)}
+                                <span
+                                  className={`px-1 py-0.2 rounded text-[8px] font-bold uppercase tracking-wider ${
+                                    isFlash
+                                      ? 'bg-rose-900 text-rose-200'
+                                      : isPriority
+                                      ? 'bg-amber-900 text-amber-200'
+                                      : 'bg-[#1a1a1a] text-[#a0a0a0]'
+                                  }`}
+                                >
+                                  {alert.tier}
+                                </span>
+                                {distanceKm !== null && (
+                                  <span className="px-1 py-0.2 rounded text-[8px] bg-[#00ff41]/10 text-[#00ff41] border border-[#00ff41]/20">
+                                    📍 {distanceKm.toFixed(0)} km
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={(e) => toggleStar(e, alert.id)}
+                                  className="p-1 -m-1 rounded hover:bg-[#222222] transition-colors"
+                                  title={isStarred ? "Starred - Click to remove follow-up" : "Star alert to follow-up"}
+                                >
+                                  <Star className={`w-3 h-3 ${isStarred ? 'text-amber-400 fill-amber-400' : 'text-[#555555] hover:text-amber-300'}`} />
+                                </button>
+                                <span className="text-[8px] text-[#666666]">
+                                  {new Date(alert.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Title */}
+                            <h3 className={`text-[11px] font-medium font-sans mb-1 leading-snug ${
+                              isFlash ? 'text-rose-100 font-semibold' : isPriority ? 'text-amber-100' : 'text-[#f0f0f0]'
+                            }`}>
+                              {alert.title.replace(/^[🔴🟡🔵]\s[A-Z]+:\s/, '')}
+                            </h3>
+
+                            {/* Summary Snippet */}
+                            <p className="text-[10px] text-[#a0a0a0] line-clamp-2 leading-relaxed font-sans">
+                              {alert.summary}
+                            </p>
+
+                            {/* Expanded Details */}
+                            {isExpanded && (
+                              <div className="mt-1.5 pt-1.5 border-t border-[#1f1f1f] space-y-1 text-[9px]">
+                                {alert.metrics && (
+                                  <div className="grid grid-cols-2 gap-1 bg-[#080808] border border-[#1a1a1a] p-1.5 rounded">
+                                    {Object.entries(alert.metrics).map(([k, v]) => (
+                                      <div key={k}>
+                                        <span className="text-[#737373]">{k}: </span>
+                                        <span className="text-[#00d1ff] font-semibold">{v}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+
+                                <div className="flex items-center justify-between text-[#888888] pt-1">
+                                  <span>Time: {new Date(alert.timestamp).toLocaleString()}</span>
+                                  {alert.sourceUrl && (
+                                    <a
+                                      href={alert.sourceUrl}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="text-[#00ff41] hover:underline flex items-center gap-1"
+                                    >
+                                      Source <ExternalLink className="w-2.5 h-2.5" />
+                                    </a>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
       </div>
     </aside>
   );
